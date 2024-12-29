@@ -1,0 +1,194 @@
+---
+title: "MATH533 Final Project"
+author: "Eric O'Leary"
+date: "December 13th, 2024"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Part I. Time series regression
+
+-   Generate a time series plot of the data, and identify an appropriate trend model. Provide the algebraic expression of the model.
+
+```{r goldplot, fig.cap="Plot of gold data"}
+gold <- read.csv("gold_yearly.csv")
+plot(gold$year, gold$average_value, main="Time series plot of average gold price per year",
+     type='l', xlab="Year", ylab="Average price")
+```
+
+The data appears to follow an increasing polynomial curve, with an order greater than linear. We will examine quadratic and cubic, since we want our model to be both accurate and lightweight, and higher orders start to violate the second condition. Thus, we will investigate models of the form $y_t = \beta_0 + \beta_1t + \beta_2t^2$ and $y_t = \beta_0 + \beta_1t + \beta_2t^2 + \beta_3t^3$, where $t$ is years elapsed since 1995.
+
+-   What is the estimated or fitted model?
+
+```{r}
+cat("-------- Quadratic model --------\n")
+quad_gold <- lm(average_value ~ X + I(X^2), data=gold)
+summary(quad_gold)
+plot(gold$X, gold$average_value, main="Average gold price per year with quadratic model",
+     type="o", pch=20, xlab="Time", ylab="Average price", lwd=1.5)
+lines(predict(quad_gold, newdata = data.frame(X=gold$X)), col="red", lwd=1.5)
+
+cat("\n-------- Cubic model --------\n")
+cube_gold <- lm(average_value ~ X + I(X^2) + I(X^3), data=gold)
+summary(cube_gold)
+plot(gold$X, gold$average_value, main="Average gold price per year with cubic model",
+     type="o", pch=20, xlab="Time", ylab="Average price", lwd=1.5)
+lines(predict(cube_gold, newdata = data.frame(X=gold$X)), col="red", lwd=1.5)
+
+cat("AIC of quadratic:", AIC(quad_gold), " | AIC of cubic:", AIC(cube_gold))
+```
+
+The quadratic model is $y_t = 564.2949 - 111.8777t + 9.6502t^2$, and the cubic model is $y_t=417.2800 - 25.9041t - 1.9563t^2 + .4299t^3$.
+
+-   What is the estimated error variance?
+
+The estimated variance of the quadratic model is $52.53^2=2759.401$, whereas for the cubic model, it is $31.43^2=987.8449$.
+
+-   Cite several regression statistics to summarize the quality of the model.
+
+For the quadratic model, we have $R^2=.9834$ and $R^2_a=.981$, which implies the model explains over 98% of the variance in the dataset.
+
+For the cubic model, we have $R^2=.9945$ and $R^2_a=.9932$, implying that the model explains close to 99.5% of the data. The similarity of the two values and the increase in $R^2_a$ compared to quadratic imply that the cubic term contributes information without bloating the model.
+
+Both models are significant compared to a horizontal model, as seen by the F-test results. Every parameter for the quadratic model is significant, whereas only the intercept and the cubic term are significant for the cubic model. Perhaps a cubic model without the quadratic term would be an even better fit.
+
+In comparison, the cubic model has a much smaller standard error as well as a smaller AIC.
+
+By all of these measures, we expect the cubic model to be a better fit for the data, though its non-significant parameters may imply it to be too complex of a model.
+
+-   Generate a plot of residuals against fitted values. What insights do we hope to gain? Are there any unusual patterns?
+
+```{r}
+plot(quad_gold, which=1, main="Residuals vs Fitted for quadratic model")
+plot(cube_gold, which=1, main="Resudials vs Fitted for cubic model")
+```
+
+We hope to see residuals that are randomly scattered around the line $y=0$ with no outliers.
+
+The quadratic model shows a clear trend, most likely a decreasing quadratic trend. By contrast, the cubic model has much less of a trend, but is also not a perfect fit. The cubic model also has a smaller range of residuals, matching what we know about the quality of both fits.
+
+In both models, there are notable outliers - particularly, points 15 and 17. This is a particular problem for us, as our dataset is so small, having over 10% of the data being outliers is a problem. Also, those points are the latest points in the time series, meaning that the points we are least likely to fit well are also the most important for our forecasting.
+
+-   Provide a qq-plot of residuals. What do we hope to learn? Do we see any model inadequacies?
+
+```{r}
+plot(quad_gold, which=2, main = "QQ plot of residuals for quadratic")
+plot(cube_gold, which=2, main = "QQ plot of residuals for cubic")
+```
+
+An assumption of our regression model is that the error is normally distributed. We hope to see that the residuals, which approximate the error, are also normally distributed. This is indicated by the residuals closely following a straight line in the qq-plot, with a potential for outliers on either side.
+
+For both models, a majority of the data does follow the line, indicating the residuals are normally distributed. Points 15 and 17 appear to be outliers in both cases again, though only 17 is drastic enough to warrant investigation from this graph. The quadratic model also has point 1 as a significant outlier.
+
+-   Using ACF, analyze if there is any dependence between residuals.
+
+```{r}
+acf(quad_gold$residuals, main="ACF of quadratic model residuals")
+acf(cube_gold$residuals, main="ACF of cubic model residuals")
+```
+
+In both cases, we do not see a significant ACF at any lag, implying that there is no significant correlation or dependence between residuals. Note that the ACF of lag 0 is always 1, as the correlation of anything with itself is 1.
+
+-   Use this model to provide a 95% prediction interval for 2012.
+
+```{r}
+point_quad <- predict(quad_gold, newdata = data.frame(X=18))
+se_quad <- summary(quad_gold)$sigma
+
+point_cube <- predict(cube_gold, newdata = data.frame(X=18))
+se_cube <- summary(cube_gold)$sigma
+
+points <- c(point_quad, point_cube)
+ses <- c(se_quad, se_cube)
+
+preds_poly <- data.frame(type=c("Quadratic", "Cubic"), point = points,
+                         lower = points - 1.96 * ses, upper = points + 1.96 * ses)
+preds_poly
+```
+
+
+Conclusion: From all of this data, the preferred polynomial model is the cubic model. It does not have too many parameters, as seen by its $R^2$ and $R^2_a$ being very close, and it has improved performance compared to the quadratic model, featuring a better (lower) AIC, smaller residual error, and the residuals vs fitted plot of the quadratic model displays a trend implying a missing component in the model. There may be a potential improvement in removing the least significant component - $t^2$ - from the cubic model, but the full cubic performs very well on the data we have.
+
+# Part II. Box-Jenkins
+
+-   Based on the time-series plot, is the data stationary?
+
+Figure 1. clearly displays a significant polynomial trend, implying a mean that changes over time. This violates the first condition for weak stationarity.
+
+-   Based on sample ACF, do the first-order differences appear stationary? If not, describe what order of differencing provides a stationary series.
+
+```{r}
+gold_diff1 <- diff(gold$average_value)
+acf(gold_diff1, main="ACF of first-order difference")
+
+gold_diff2 <- diff(gold_diff1)
+acf(gold_diff2, main="ACF of second-order difference")
+```
+
+Looking at the ACF for the first two orders of differencing, first-order still appears to be non-stationary, as it decreases slowly. By comparison, second-order differencing appears to be stationary, as all values are non-significant and the autocorrelation decreases to zero as lag increases.
+
+-   Examine the PACF for the stationary difference series and identify an appropriate ARIMA model. Express the model algebraically.
+
+```{r}
+pacf(gold_diff2, main="PACF of differenced series")
+```
+
+Since the PACF of the second-order differenced series has no significant values, our ARIMA model will have $p=0$. Since the ACF also has no significant values past lag 0, we also expect $q=0$ in our model. This gives us the model of ARIMA(0,2,0). 
+
+```{r}
+library(forecast) # For Arima() and forecast()
+
+gold_arima <- Arima(gold$average_value, order=c(0,2,0))
+summary(gold_arima)
+
+plot(gold$X, gold$average_value, main="Time series plot of average gold price per year",
+     type='o', pch=20, xlab="Year", ylab="Average price", lwd=1.5)
+lines(fitted(gold_arima), col="red", lwd=1.5)
+```
+
+For $d=2$, we have no constant term. Thus, the formula is $$(1-B)^2y_t = \epsilon_t \Rightarrow y_t-2y_{t-1}+y_{t-2} = \epsilon_t \Rightarrow y_t = 2y_{t-1}-y_{t-2}+\epsilon_t.$$
+
+-   What is the estimated model and error variance?
+
+Since we have no parameters, the model is exactly its algebraic expression as an estimation; $\hat{y}_t = 2y_{t-1} - y_{t-2}$. The variance, as obtained from the summary, is $4778$.
+
+-   Use this model to predict a 95% prediction interval for 2012.
+
+Following the formula directly, $\hat{y}_{t+1}=2y_t-y_{t-1}$. Since the differencing procedure creates stationary data, the variance should be constant for the entire model. From this, calculating a prediction interval is simple.
+
+```{r}
+sigma_arima <- sqrt(gold_arima$sigma2)
+
+y16 <- gold$average_value[16]
+y17 <- gold$average_value[17]
+pred_arima <- 2*y17-y16
+low_arima <- pred_arima - sigma_arima * 1.96
+high_arima <- pred_arima + sigma_arima * 1.96
+
+preds_arima <- data.frame(point=c(pred_arima), lower=c(low_arima), upper=c(high_arima))
+preds_arima
+```
+
+# Part III. Comparison
+
+-   How does the analysis differ between methods? What are the strengths and limitations of each approach?
+
+```{r}
+# AIC(quad_gold)
+# AIC(cube_gold)
+# AIC(gold_arima)
+
+# summary(cube_gold)$sigma
+# sqrt(gold_arima$sigma2)
+```
+
+Between the regression models, there is a clear preference for the cubic model, as explained at the end of part I. 
+
+Comparing the cubic model to the ARIMA model, they are extremely close in AIC, at 170.9066 for cubic and 171.6436 for ARIMA. As for standard error, the cubic model has $\sigma=31.4293$, which is less than half of the ARIMA model with $\sigma=69.1203$. Based on these preferences, the cubic model is a better fit for the data provided, though both are fine models. Given how the latest data points experience the greatest changes, comparing forecasting power may not be reliable, especially on such a small dataset.
+
+One important point is that while the cubic model is better for the given data, there is a clear trend emerging at the end of the time series, and it is unclear how it will continue to develop. The cubic model will continue increasing at a fast rate, whereas the ARIMA model will adapt to new information and match future trends better. If we intend to pick a model to use for multiple years and update with new data as it becomes available, the ARIMA model will be a better pick if we expect the shape of the graph to change. Given the data is about gold prices, which is highly related to other economic factors, someone seeking to apply this model to the real world will have a more researched opinion of which to choose. To summarize, while the cubic model is a better fit, the ARIMA model will adapt better to new if it does not continue the observed trend.
+
+Also note there is some unexplored potential in a model with only $t^3$ and $t$ as terms, since $t^2$ is not significant in the cubic model. This may provide an even better model, but given that the performance of the cubic model is more than satisfactory, reaching $R^2_a > .99$, there is not a strong need.

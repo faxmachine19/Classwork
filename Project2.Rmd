@@ -1,0 +1,266 @@
+---
+  title: "MATH601 Project 2"
+  author: "Eric O'Leary"
+  output: pdf_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(maps)
+```
+
+
+# 1. Bob Ross
+
+This dataset is an analysis of the visual elements and objects present in the paintings of Bob Ross throughout the entirety of his show, "The Joy of Painting." It contains episode number, episode title, and a count of each element per episode. The data is available at https://github.com/fivethirtyeight/data/tree/master/bob-ross, and the original analysis of this dataset is available at https://fivethirtyeight.com/features/a-statistical-analysis-of-the-work-of-bob-ross/.
+
+```{r}
+ross <- read.csv("elements-by-episode.csv")
+
+# Sum each category into one column
+rosssum <- ross |> 
+  rowwise() |>
+  summarize(EPISODE = EPISODE,
+    NATURE = sum(across(c(AURORA_BOREALIS, BEACH, BUSHES, CACTUS, CIRRUS, CLIFF, CLOUDS, CONIFER, 
+                          CUMULUS, DECIDUOUS, FIRE, FLOWERS, FOG, GRASS, HILLS, LAKE, LAKES, MOON, 
+                          MOUNTAIN, MOUNTAINS, NIGHT, OCEAN, PALM_TREES, ROCKS, SNOW, SNOWY_MOUNTAIN, 
+                          SUN, TREE, TREES,WATERFALL, WAVES, WINTER))),
+    PERSON = sum(across(c(DIANE_ANDRE, GUEST, PERSON, PORTRAIT, STEVE_ROSS))),
+    MANMADE = sum(across(c(BARN, BOAT, BRIDGE, BUILDING, CABIN, DOCK, FARM, FENCE, LIGHTHOUSE, MILL,
+                           PATH, STRUCTURE, WINDMILL))))
+  
+
+ggplot(rosssum |>
+         pivot_longer(c("NATURE", "PERSON", "MANMADE"),
+                      names_to = "ELEMENT",
+                      values_to = "FREQUENCY"), 
+       aes(x = EPISODE, y = FREQUENCY, color = ELEMENT, group=ELEMENT)) +
+  geom_line(lty=1, linewidth=.5, alpha=1) + 
+  # To avoid clutter, rotate x ticks, only mark first episode per season, and remove episode number
+  scale_x_discrete(breaks = c(paste0("S0", 1:9, "E01", sep=""), paste0("S", 10:31, "E01", sep="")),
+                   guide = guide_axis(angle = 45),
+                   labels = c(paste0("S0", 1:9, sep=""), paste0("S", 10:31, sep=""))) +
+  labs(title = "Popularity of different types of subjects in 'The Joy of Painting'",
+       subtitle = "Frequency of three categories of elements through episodes chronologically",
+       caption = "Data available at https://github.com/fivethirtyeight/data/tree/master/bob-ross")
+
+# acf(rosssum$NATURE)
+```
+
+After grouping by elements, the most popular category is consistently nature, with an average of about 6 natural elements per episodes. The least popular is by far person, with the majority of episodes having no humans. Man-made elements, the final category, have many episodes with no elements, but are noticeably more popular than people. There doesn't seem to be any particular trend or seasonality for any of the categories, and the most popular, nature, resembles a white noise process, which can be verified by ACF analysis.
+
+
+# 2. Librarians
+
+This dataset is a selection of occupational statistics from the Bureau of Labor Statistics about librarians. It contains cities and states, an estimate on the number of employees in that city, percent relative standard error of that estimate of employees, jobs per 1000 residents of that city, and location quotient of librarians in that region. The data is available at https://github.com/fivethirtyeight/data/tree/master/librarians, and the original analysis of the data is available at https://fivethirtyeight.com/features/where-are-americas-librarians/.
+
+```{r}
+lib <- read.csv("librarians-by-msa.csv")
+usa <- map_data("usa")
+
+# Add geographical data to each point of librarian data
+fulldata <- inner_join(lib |> # Remove states outside contiguous US + missing data
+                         filter(!(prim_state %in% c("PR", "AK", "HI")),
+                                tot_emp != "**") |>
+                         # Get city name from area_name (which is "city, state code")
+                         separate_wider_regex(area_name, patterns = c(city = "[^,-]+", ".+")) |>
+                         # Add state back in to match geographical data + convert data types
+                         mutate(city = paste(city, prim_state),
+                                tot_emp = as.numeric(tot_emp),
+                                loc_quotient = as.numeric(loc_quotient)), 
+                       # Join with useful columns of geographical data
+                       us.cities[, c("name", "lat", "long", "country.etc")],
+                       by = join_by(city == name, prim_state == country.etc)
+                 # Remove state code from city column
+            ) |> mutate(city = gsub(".{3}$", "", city))
+
+ggplot(usa, aes(x=long, y=lat)) +
+  geom_polygon(aes(group = group), alpha=.7) +
+  coord_map() +
+  geom_point(fulldata, mapping = aes(x=long, y=lat, 
+                                     size=tot_emp, 
+                                     color=loc_quotient,
+                                     alpha=.9)) +
+  guides(alpha = "none") + # Remove alpha from legend
+  scale_size_binned("Total Employees", range = c(.1,5)) + 
+  scale_color_fermenter("Location Quotient", direction = 1, palette = "RdYlGn") +
+  labs(title = "Librarians across US cities",
+       caption = "Data available at: https://github.com/fivethirtyeight/data/tree/master/librarians") +
+  theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+As expected, the distribution of data points follows the distribution of cities in America, and the distribution of total employees also roughly follows the distribution of US population. Notably, the northeastern urban areas like New York have a higher number of employees and a higher location quotient compared to California. Some research finds that in California, library funding is not a high priority and the state has a high population, which explains both the low number of employees and the high number of non-librarian employees (and thus the low location quotient).
+
+
+# 3. Food World Cup
+
+This dataset is a survey of 1373 Americans in 2014 on how well they view the cuisines of the thirty two countries in the 2014 world cup, as well as eight other countries with commonly well-regarded food. The survey contains how interested they are in food, their opinion on the cuisines of the chosen countries, and demographic information. The data is available at https://github.com/fivethirtyeight/data/tree/master/food-world-cup, and the original analysis is available at https://fivethirtyeight.com/features/the-fivethirtyeight-international-food-associations-2014-world-cup/.
+
+```{r}
+# Due to original file formatting, need different encoding + later wrangling
+foodworld <- read.csv("food-world-cup-data.csv", fileEncoding = "latin1")
+
+# Trim column names to remove spaces, an unneeded character, and leave only the country
+colnames(foodworld) <- gsub("[\\.Ê]", "", colnames(foodworld))
+colnames(foodworld) <- gsub("Pleaseratehowmuchyoulikethetraditionalcuisineof", "",colnames(foodworld))
+# Rename columns with smaller names
+colnames(foodworld)[2:3] <- c("Knowledge", "Interest")
+foodworld[foodworld == "" | foodworld == "N/A"]  <- NA
+
+reducedfood <- foodworld |> 
+  # Convert all character columns to factors
+  mutate_if(is.character, as.factor) |>
+  # Remove demographic information as we don't use it
+  select(-c("RespondentID", "Knowledge", "Interest", "Gender", "Age", "HouseholdIncome", "Education", "LocationCensusRegion")) |>
+  # Replace country + ranking columns with country column and ranking column
+  pivot_longer(
+    cols = colnames(foodworld)[4:43],
+    values_to = "favor",
+    names_to = "country"
+  ) |>
+  # Get only countries with at least 50 votes of rating 5
+  filter(favor == 5) |>
+  count(country) |>
+  filter(n >= 50)
+
+ggplot(reducedfood, aes(x=reorder(country, n), y=n, fill=n)) +
+  geom_col() + 
+  coord_polar() +
+  scale_fill_fermenter(breaks = seq(50,500,100), palette="RdYlBu") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  labs(title = "Frequency of rating a country's cuisine 5/5",
+       subtitle = "Only countries with at least 50 votes out of 1373",
+       caption = "Data available at https://github.com/fivethirtyeight/data/tree/master/food-world-cup",
+       fill = "Frequency")
+```
+
+We see that Italy's cuisine is rated 5/5 most often, with a significant lead over the United States and Mexico, which are second and third place respectively. The majority of the cuisines listed here also match what one would expect from restaurants around the United States. It is interesting to note that of the 17 countries above the cut-off, nearly half are European, about a third are Asian, and there are no African countries.
+
+
+# 4. Star Wars
+
+This dataset is from a survey of 1186 US residents in 2014, asking various questions about how many Star Wars films an individual has seen, their personal ranking, opinions on characters, various other questions, and demographic information including gender, age, income, education, and general location. The data is available at https://github.com/fivethirtyeight/data/tree/master/star-wars-survey, and the original analysis is available at https://fivethirtyeight.com/features/americas-favorite-star-wars-movies-and-least-favorite-characters/.
+
+```{r}
+starwarsfull <- read.csv("StarWars.csv", fileEncoding = "latin1")
+
+starwarsmid <- starwarsfull |> 
+  # Select relevant columns
+  select(c(10,11,12,13,14,15,34,35,36,37)) |>
+  rename(c("Episode1" = 1, "Episode2" = 2,"Episode3" = 3, "Episode4" = 4, "Episode5" = 5, "Episode6" = 6)) |> 
+  # First column contains subquestion information; unneeded
+  filter(!row_number() == 1) |> 
+  # Set rankings of each episode to numbers or NA, and make other columns factors
+  mutate(Episode1 = as.numeric(Episode1, na_if(Episode1, "")),
+         Episode2 = as.numeric(Episode2, na_if(Episode2, "")),
+         Episode3 = as.numeric(Episode3, na_if(Episode3, "")),
+         Episode4 = as.numeric(Episode4, na_if(Episode4, "")),
+         Episode5 = as.numeric(Episode5, na_if(Episode5, "")),
+         Episode6 = as.numeric(Episode6, na_if(Episode6, "")),
+         Gender = as.factor(Gender),
+         Age = as.factor(Age),
+         Income = factor(gsub("^$", "Data not provided", Household.Income),
+                            levels = c("Data not provided", "$0 - $24,999",
+                                       "$25,000 - $49,999", "$50,000 - $99,999",
+                                       "$100,000 - $149,999", "$150,000+")),
+         Education = as.factor(Education)) |>
+  select(-c(Household.Income))
+
+starwars <- starwarsmid |> 
+  # Replace NA with 0 (rankings now 0,1,2,3,4,5,6 with 1 being highest rating),
+  # then make binary column of 0 = not highest rating, 1 = highest rating
+  mutate(Episode1 = as.numeric(replace_na(Episode1, 0) == 1),
+         Episode2 = as.numeric(replace_na(Episode2, 0) == 1),
+         Episode3 = as.numeric(replace_na(Episode3, 0) == 1),
+         Episode4 = as.numeric(replace_na(Episode4, 0) == 1),
+         Episode5 = as.numeric(replace_na(Episode5, 0) == 1),
+         Episode6 = as.numeric(replace_na(Episode6, 0) == 1)) |>
+  # Convert to long format for graphing
+  pivot_longer(
+    cols = c("Episode1", "Episode2", "Episode3", "Episode4", "Episode5", "Episode6"),
+    values_to = "FavoriteEpisode",
+    names_to = "Episode") |>
+  # Get only the favorite episode for each respondent and
+  filter(FavoriteEpisode == 1) |> 
+  # Make episode name pretty for graphing
+  mutate(FavoriteEpisode = as.factor(gsub("Episode", "Episode ", Episode))) |> 
+  select(-Episode)
+
+ggplot(starwars, aes(x=FavoriteEpisode, fill=Income)) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = "Frequency of income levels based on favorite Star Wars movie",
+       caption = "Data available at https://github.com/fivethirtyeight/data/tree/master/star-wars-survey") +
+  xlab("Favorite Episode") + 
+  ylab("Frequency")
+```
+
+We look at a count of favorite movies for each of the original six Star Wars movies, grouped by income level. Firstly, there is a clear difference in overall count between episodes, with 5 being a clear favorite, 4 and 6 being close to second favorite, and 2 and 3 being the least voted.
+
+Looking within each group, there is no major difference in distribution with respect to income. In all cases, the lowest and highest income group are the lowest frequencies, the middle income group is the highest, and the remaining two income groups are roughly the same, in between the other groups, and close to "Data not provided." This distribution is what we expect for the population as of 2014, where the majority are middle class. 
+
+
+# 5. Unisex Names
+
+This dataset contains information about every name that has at least 100 living Americans, as of 2013, where the minority gender for that name is at least $\frac{1}{3}$ of the total, according to the Social Security Administration. This dataset contains over 900 such names, an estimate of the total number of living Americans with that name, the percentage of males and females for that name, and the gap between those two. The data is available at https://github.com/fivethirtyeight/data/tree/master/unisex-names, and the original analysis is available at https://fivethirtyeight.com/features/there-are-922-unisex-names-in-america-is-yours-one-of-them/.
+
+```{r}
+names <- read.csv("unisex_names_table.csv")
+
+namesfirst <- names |>
+  # Get first letter and numbers of male/female per name
+  mutate(firstletter = substring(name, 0, 1),
+         nummale = male_share * total,
+         numfemale = female_share * total) |>
+  group_by(firstletter) |>
+  # By first letter, get total Americans, number of male/female, and compute
+  # gender share by total of each first letter
+  summarize(
+    total = sum(total),
+    nummale = sum(nummale),
+    numfemale = sum(numfemale),
+    male_share = nummale / total,
+    female_share = numfemale / total
+  ) |> 
+  # Prepare data for graphing
+  pivot_longer(cols = c("female_share", "male_share"),
+               names_to = "gender",
+               values_to = "share") |> 
+  # Make data cleaner and make legend creation easier
+  mutate(gender = gsub("_share", "", gender))
+
+ggplot(namesfirst,
+       aes(x=firstletter, y=share, fill=gender)) +
+  geom_col(position="fill") + 
+  coord_flip() +
+  scale_fill_discrete("Gender", type=c("pink","skyblue")) +
+  # Remove margin outside axes and counteract coord_flip() reversing order of letters
+  scale_x_discrete(limits = rev(namesfirst$firstletter), expand = c(0,0)) + 
+  scale_y_continuous(breaks = c(.25,.33,.5,.67,.75), expand = c(0,0)) +
+  # Add lines at 50% share and the 1/3 cutoff on either side
+  geom_abline(slope = 0, intercept = .5) +
+  geom_abline(slope = 0, intercept = .33, lty = 2) + 
+  geom_abline(slope = 0, intercept = .67, lty = 2) +
+  labs(title = "Gender distribution of most common unisex names by first letter",
+       subtitle = "Data from SSA on living Americans as of 2013",
+       caption = "Data available at https://github.com/fivethirtyeight/data/tree/master/unisex-names") +
+  xlab("First Letter") + 
+  ylab("Share")
+```
+
+When we summarize frequency and gender share across first letters, we get a roughly even distribution. About 10 are letters are primarily female, 11 are primarily male, and 5 are roughly equal in share, and the majority of those shares are close to 50%.
+
+While none of the female-dominated letters approach the 33% cutoff the original dataset used to determine if a name was unisex, two male-dominated letters, U and Q, are both close to that cutoff. However, U and Q are uncommon first letters in English, so the sample size - count of names with that first letter - may be too small for this conclusion to be strongly supported.

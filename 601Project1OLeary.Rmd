@@ -1,0 +1,494 @@
+---
+title: "MATH601 Project 1"
+author: "Eric O'Leary"
+date: "December 5th, 2024"
+output: pdf_document
+---
+
+# Creating Web-Based Graphics with Shiny
+
+## What is Shiny?
+
+Shiny is a package for R and Python created to help design interactive graphics for web applications. 
+It is very simple to use, has robust documentation, tutorials, and example code, 
+as well as plenty of features for customization.
+
+```{r}
+library(shiny)
+
+runExample("01_hello")
+```
+
+Do note that the R console you use to run the app will be busy until you close the app,
+which makes it more difficult to look at documentation or test code in R Studio.
+I'd recommend designing all of your data wrangling + graphs without launching Shiny, 
+then pasting the code into the app. 
+This method also takes less time to run than launching Shiny multiple times.
+
+The most intended way to run a Shiny project is to create a folder just for that project,
+and to have a file named "app.R" with your Shiny code. You can then call runApp(directorypath)
+in order to launch the app. Here, I have essentially written many app.R files which I run manually.
+
+
+## A Pedagogical Example
+
+To better illustrate how the package works and what it can do, let's create a simple example, step-by-step.
+
+Firstly, we import the necessary libraries.
+
+```{r}
+library(shiny) # Package of focus
+library(bslib) # Allows using Bootstrap/Sass (CSS framework) for page styling
+library(ggplot2)
+library(dplyr)
+library(palmerpenguins) # Dataset of interest
+
+penguins
+```
+
+Next, we create a blank page.
+
+A Shiny app has two main features: a ui object, and a server function.
+The ui object defines what the app looks like, and is very customizable, 
+with different functions to create the object with different layouts 
+as well as different UI elements to add to it.
+The server function handles computations after the app has been launched in response to user input.
+
+```{r}
+# page_sidebar is easy format, but there are others
+ui <- page_sidebar()
+
+# Server must take input, output arguments, can optionally take a third
+server <- function(input, output) {
+  
+}
+```
+
+```{r}
+shinyApp(ui = ui, server = server)
+```
+
+Next, we add some basic elements to the ui.
+IMPORTANT: UI elements are created by passing arguments to functions. 
+As such, commas between these elements are necessary. 
+Once elements start being nested, it is very easy to forget this.
+
+```{r}
+ui <- page_sidebar(
+  # Adding text as the first item functions as a title
+  h1("Relationships between measurements of Palmer penguins"),
+  # Sidebar, good place to add controls for the main application
+  sidebar = sidebar(
+    # Text in sidebar
+    "Text goes here",
+    # Again, html format works so we can make our caption smaller
+    p("Here's a caption", style="font-size:10px")
+  ),
+  # Card, most basic way to add sections to the main application
+  card("Text")
+)
+```
+
+```{r}
+shinyApp(ui = ui, server = server)
+```
+
+Now, we want to add something interactive (even if it doesn't do anything yet).
+
+```{r}
+penguins
+
+peng_numeric <- c("Bill Length" = "bill_length_mm",
+                  "Bill Depth" = "bill_depth_mm",
+                  "Flipper Length" = "flipper_length_mm",
+                  "Body Mass" = "body_mass_g")
+
+
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    
+    selectInput(
+      # Input id is internal label, important for later
+      inputId = "x",
+      # Label is what user sees above input method
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ), # Don't forget comma
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  card("Text")
+)
+```
+
+```{r}
+shinyApp(ui, server)
+```
+
+Now that we have an option to select variables, we want to create a graph using them.
+Since this now involves computation done after launching the app, we need to use server.
+
+An important note on scoping: the server function has input and output as parameters, 
+and can therefore access them like they exist. The UI object, however, does not have these
+objects. So, in UI, we use strings, and in server, we use objects.
+
+```{r}
+# Input and output are objects that we read/write to modify the app
+server <- function(input, output) {
+  # To create dynamic output, we add it to the output object
+  
+  # Render plot is one of many render functions for different data types
+  output$graph <- renderPlot({ # Main argument is an R expression to run
+    # To access a selected variable, use input$(label)
+    ggplot(penguins, aes(x = get(input$x), y = get(input$y))) +
+      geom_point()
+  })
+}
+```
+
+This gives us a rendered plot of the variables we want, but does nothing to display it. Recall that the visual aspect of the app is controlled by ui:
+
+```{r}
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    selectInput(
+      inputId = "x",
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ),
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  # Since we used renderPlot, we need plotOutput
+  # Since we saved the plot at output$graph, we use that label here
+  card(plotOutput(outputId = "graph"))
+)
+```
+
+```{r}
+shinyApp(ui, server)
+```
+
+We now have an interactive graph mapping variables against each other. 
+However, there are other variables in the dataset that may be of interest. 
+So, let's add the ability to group by different variables. We'll also clean up the 
+graph to make it look a bit more professional.
+
+```{r}
+peng_cats <- c("Species" = "species",
+               "Island" = "island",
+               "Sex" = "sex")
+
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    selectInput(
+      inputId = "x",
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ),
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    # Add a choice of group
+    # Using radio buttons for variety of not just using select
+    radioButtons(
+      inputId = "group",
+      label = "Select a variable to color by:",
+      choices = peng_cats
+    ),
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  card(plotOutput(outputId = "graph"))
+)
+
+
+
+server <- function(input, output) {
+  # Made prettier, and grouping by input exactly as expected
+  output$graph <- renderPlot({
+    ggplot(penguins, aes(x = get(input$x), y = get(input$y), 
+                         color=get(input$group), shape=get(input$group))) +
+      geom_point() +
+      # Since names of our choices are prettier than the raw variables, 
+      # we do a little transformation to retrieve them
+      xlab(names(peng_numeric)[peng_numeric == input$x]) +
+      ylab(names(peng_numeric)[peng_numeric == input$y]) +
+      # Also, scale color and shape by selected categorical variable
+      scale_color_discrete(names(peng_cats)[peng_cats == input$group]) +
+      scale_shape_discrete(names(peng_cats)[peng_cats == input$group]) +
+      labs(title = "Graph of different attributes of Palmer penguins")
+  })
+}
+
+shinyApp(ui, server)
+```
+
+Now, we have a pretty graph with functioning interactivity! 
+We could stop here, but let's add some linear regression to explain a few more concepts.
+
+```{r}
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    selectInput(
+      inputId = "x",
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ),
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    radioButtons(
+      inputId = "group",
+      label = "Select a variable to color by:",
+      choices = peng_cats
+    ),
+    # We add a checkbox to ask whether to show regression or not
+    checkboxInput(
+      inputId = "regression",
+      label = "Show linear regression?",
+      value = FALSE
+    ),
+    # If the user wants regression, we then ask if they want it by group or not
+    conditionalPanel(
+      # The condition argument is a JavaScript expression, and can be very complex
+      condition = "input.regression == true",
+      checkboxInput(
+        inputId = "reggroup",
+        label = "Regress by group?",
+        value = FALSE
+      )
+    ),
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  card(plotOutput(outputId = "graph"))
+)
+```
+
+So, we know that we want the option to add a regression line, and we also want to 
+be able to do so with or without following the user's selected group.
+For this, we will use reactivity.
+
+Reactivity is a very important concept when making larger applications, using larger data,
+or handling data from the web such as with live updates.
+To explain, we want to look at the structure of the application and talk about code efficiency.
+
+When writing an app.R file, it will look something like this:
+
+```{r, eval=FALSE}
+# Code here will run once, when the app is launched from the creator
+# This should include loading libraries, tidying data, and defining variables
+# UI is a variable, so it will be run once at this stage as well
+
+library(shiny)
+library(ggplot2)
+library(palmerpenguins)
+
+peng_cats <- c("Species" = "species",
+               "Island" = "island",
+               "Sex" = "sex")
+
+peng_numeric <- c("Bill Length" = "bill_length_mm",
+                  "Bill Depth" = "bill_depth_mm",
+                  "Flipper Length" = "flipper_length_mm",
+                  "Body Mass" = "body_mass_g")
+
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    selectInput(
+      inputId = "x",
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ),
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    radioButtons(
+      inputId = "group",
+      label = "Select a variable to color by:",
+      choices = peng_cats
+    ),
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  card(plotOutput(outputId = "graph"))
+)
+
+server <- function(input, output) {
+  # The second place code is run is inside the server function
+  # This code is run once PER USER when they first connect to the application
+  # Anything computation that can be taken out of here should be for efficiency
+  # Render functions will also be run once when the user connects to the app
+  
+  output$graph <- renderPlot({
+    # Any time a variable used inside a render expression is updated by the user,
+    # the ENTIRE render expression will be re-run
+    
+    # If our render function scrapes the most recent version of a website's data,
+    # our application will be using an impolite amount of bandwidth
+    ggplot(penguins, aes(x = get(input$x), y = get(input$y), 
+                         color=get(input$group), shape=get(input$group))) +
+      geom_point() +
+      xlab(names(peng_numeric)[peng_numeric == input$x]) +
+      ylab(names(peng_numeric)[peng_numeric == input$y]) +
+      scale_color_discrete(names(peng_cats)[peng_cats == input$group]) +
+      scale_shape_discrete(names(peng_cats)[peng_cats == input$group]) +
+      labs(title = "Graph of different attributes of Palmer penguins")
+  })
+}
+
+shinyApp(ui, server)
+```
+
+If we assume our application will have thousands of concurrent users, we want to
+minimize the amount of computation done per click.
+
+Reactivity has the program track whether a certain expression has been updated and
+recalculate only if necessary. 
+
+One example is if we wanted to filter our data and perform a transformation after.
+Suppose we have a dataset with time and income as variables. If the user is only interested
+in a specific time frame, then we only want to use what they select because it will
+be faster to transform than the entire dataset. If they then choose to scale income 
+logarithmically , we don't want to transform the dataset or recalculate the entire graph,
+just modify what we already have. 
+
+```{r, eval = FALSE}
+# This is a completely fictitious example, purely for demonstration
+server <- function(input, output) {
+  
+  # Since this only depends on the user's input for time,
+  # it will only recalculate if those inputs change
+  selectedData <- reactive({
+    data |> 
+      filter(time >= input$timelower & time <= input$timeupper)
+  })
+  
+  # If the user changes their mind about logarithmic scaling, then
+  # this will recalculate. But, if they don't change the time range, the data 
+  # will not need to be recalculated
+  incomePlot <- reactive({
+    ggplot(selectedData(), aes(x=time, y=income)) +
+      (if(input$logscale == TRUE) {
+        scale_y_continuous(trans="log")
+      })
+  })
+  
+  output$plot <- renderPlot({
+    incomePlot()
+  })
+}
+```
+
+Now, we apply those principles to our penguins example.
+
+```{r}
+ui <- page_sidebar(
+  h1("Relationships between Measurements of Penguins"),
+  sidebar = sidebar(
+    "Choose variables and groupings to investigate relationships between different variables",
+    selectInput(
+      inputId = "x",
+      label = "Select a variable for x:",
+      choices = peng_numeric
+    ),
+    selectInput(
+      inputId = "y",
+      label = "Select a variable for y:",
+      choices = peng_numeric
+    ),
+    radioButtons(
+      inputId = "group",
+      label = "Select a variable to color by:",
+      choices = peng_cats
+    ),
+    checkboxInput(
+      inputId = "regression",
+      label = "Show linear regression?",
+      value = FALSE
+    ),
+    conditionalPanel(
+      condition = "input.regression == true",
+      checkboxInput(
+        inputId = "reggroup",
+        label = "Regress by group?",
+        value = FALSE
+      )
+    ),
+    p("Data from palmerpenguins package", style="font-size:10px")
+  ),
+  card(plotOutput(outputId = "graph"))
+)
+
+server <- function(input, output) {
+  aesReg <- reactive({
+    if(input$reggroup) {
+      aes(group = get(input$group), color = get(input$group))
+    } else {
+      aes()
+    }
+  })
+  
+  pengPlot <- reactive({
+    # Slightly changed; moved grouping to geom_point so geom_smooth can choose
+    ggplot(penguins, aes(x = get(input$x), y = get(input$y))) +
+      geom_point(aes(color=get(input$group), shape=get(input$group))) +
+      xlab(names(peng_numeric)[peng_numeric == input$x]) +
+      ylab(names(peng_numeric)[peng_numeric == input$y]) +
+      scale_color_discrete(names(peng_cats)[peng_cats == input$group]) +
+      scale_shape_discrete(names(peng_cats)[peng_cats == input$group]) +
+      labs(title = "Graph of different attributes of Palmer penguins") +
+      (if(input$regression == TRUE) {
+        geom_smooth(method="lm", aesReg())
+      })
+  })
+  
+  output$graph <- renderPlot({
+    pengPlot()
+  })
+}
+```
+
+```{r}
+shinyApp(ui, server)
+```
+
+
+## Deploying your Project
+
+Once you have a completed project, an easy way to post it for others to see is shinyapps.io.
+This service allows users to host Shiny applications online with a free option.
+It is very easy to setup and use, and then 
+
+For an example, I have a full project with some more complex uses of Shiny
+available for viewing at https://eoleary.shinyapps.io/project1/.
+
+
+## Sources
+
+In general, check out the very robust documentation at https://shiny.posit.co. 
+For beginner tutorials, check out https://shiny.posit.co/r/getstarted/shiny-basics/lesson1/. 
+For using ShinyApps, the website itself, https://www.shinyapps.io/, has an easy tutorial.
