@@ -12,7 +12,7 @@ Graduate applied regression and time series analysis. Contains a final project -
 
 ### MATH601
 
-Graduate introduction to data science. Contains two projects - A tutorial for the Shiny package for R as well as an example package; and five ggplot graphs and analysis for data from FiveThirtyEight.
+Graduate introduction to data science. Contains two projects - A tutorial for the Shiny package for R as well as an example project; and five ggplot graphs and analysis for data from FiveThirtyEight.
 
 ## UMD
 
@@ -20,7 +20,7 @@ Graduated with Bachelor's in Mathematics and Computer Science in Spring 2024.
 
 ### CMSC430
 
-Compilers. Contains multiple projects of the form: given a simplified version of Racket with features learned in class, provide additional, more complex features to multiple steps of the process.
+Compilers. Contains a final project where, given a Racket compiler with features added both in and out of class throughout the semester, add some more functionality to allow for bootstrapping.
 
 ### CMSC320
 
@@ -28,8 +28,10 @@ Introduction to data science. Contains final project - applying data science pro
 
 ### CMSC422
 
-Introduction to machine learning. Contains
+Introduction to machine learning. Contains final project - analyzing effectiveness of different methods of replacing missing data for a fictional dataset on water potability.
 
-### TODO: More classes
+### STAT400
+
+Applied probability and statistics I. Contains final group project - analyzing COVID data at the time (spring 2021).
 
 ### TODO: SAND fork (or put it in other folder)
