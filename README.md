@@ -18,6 +18,10 @@ Graduate introduction to data science. Contains two projects - A tutorial for th
 
 Graduated with Bachelor's in Mathematics and Computer Science in Spring 2024.
 
+### Undergraduate Research
+
+As part of the Gemstone Honors College, worked as part of Team SAND on prototyping self-assembling swarms of robots. Work available at https://github.com/team-sand/sand.
+
 ### CMSC320
 
 Introduction to data science. Contains final project - applying data science process to a dataset on weightlifting.
@@ -26,4 +30,4 @@ Introduction to data science. Contains final project - applying data science pro
 
 Introduction to machine learning. Contains final project - analyzing effectiveness of different methods of replacing missing data for a fictional dataset on water potability.
 
-### TODO: SAND fork (or put it in other folder)
+
