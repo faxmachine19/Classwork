@@ -14,6 +14,10 @@ Graduate applied regression and time series analysis. Contains a final project -
 
 Graduate introduction to data science. Contains two projects - A tutorial for the Shiny package for R as well as an example project; and five ggplot graphs and analysis for data from FiveThirtyEight.
 
+### MATH 688
+
+Graduate seminar class. Contains two projects - a group project for the Society of Actuaries 2025 Case Study Contest; and an independent research project on forecasting enrollment rates for the University System of Maryland.
+
 ## UMD
 
 Graduated with Bachelor's in Mathematics and Computer Science in Spring 2024.
