@@ -1,0 +1,1146 @@
+---
+  title: "SoA Case Study 2025 Work"
+  author: "Eric O'Leary"
+---
+
+This is a workbook for the 2025 SoA case study for team AES Consulting.
+This is largely unorganized scratch work, and is not the complete model used in the final version.
+However, this does represent the team's data exploration and preliminary to intermediate analysis, primarily organized and conducted by me.
+
+
+
+Team AES Consulting
+
+
+Notes:
+Navaldia only region with undetermined hazard level
+
+Hazard:
+High hazard - high property damage and casualties
+Significant hazard - high property damage
+
+Assessment:
+Satisfactory - fine
+Fair - no safety deficiency under normal conditions
+Poor - normal realistic conditions could fail
+Unsatisfactory - emergency action required
+
+
+# Importing Libraries/Data
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(mice)
+```
+
+```{r}
+damraw <- read.csv("srcsc-2025-dam-data-for-students.csv")
+econdataraw <- read_excel("srcsc-2025-economic-data-summary.xlsx", skip = 10)
+```
+
+# Analysis
+
+## Inflation and Interest Rate
+
+```{r}
+econdata <- econdataraw
+colnames(econdata) <- c("Year", "Inflation", "Overnight", "Spot1Yr", "Spot10Yr")
+  
+
+# https://data.bls.gov/pdq/SurveyOutputServlet
+usinflation <- read_xlsx("USInflation.xlsx", skip=11)
+usyearly <- usinflation |>
+  dplyr::select(-c("HALF1", "HALF2")) |> 
+  pivot_longer(
+    names_to = "Month",
+    cols = -c("Year"),
+    values_to = "Inflation"
+  ) |> 
+  group_by(Year) |>
+  summarize(us = (prod(1+Inflation/100) ^ (1/12))-1)
+
+both_inflation <- merge(econdata |> select(Year, Inflation), usyearly, by="Year")
+
+both_inflation |> 
+  rename(tarrodan = Inflation) |>
+  pivot_longer(
+    cols = c("tarrodan", "us"),
+    values_to = "inflation",
+    names_to = "country"
+  ) |> 
+  ggplot(aes(x=Year, y=inflation, color=country)) + 
+    geom_line(lwd=.5) +
+    scale_color_discrete(name="Country", labels=c("Tarrodan", "United States")) +
+    labs(title = "Yearly Inflation, United States and Tarrodan") + 
+    ylab("Inflation")
+ggsave("InflationUSTarrodan.png",
+       width=1920,
+       height=1080,
+       units="px")
+
+diff_inflation <- both_inflation |>
+  mutate(diff = Inflation - us)
+```
+
+```{r}
+yravg = c(NA)
+for(i in seq(1:(nrow(econdata)-9))) {
+  sums = c(NA)
+  for(j in 0:9) {
+    sums[j] = 1 + econdata$Spot1Yr[[i + j]]
+  }
+  yravg[i] = prod(sums) ^ (1/10)
+}
+min(yravg)
+mean(yravg)
+max(yravg)
+
+yravg = c(NA)
+for(i in seq(1:(nrow(usyearly)-9))) {
+  sums = c(NA)
+  for(j in 0:9) {
+    sums[j] = 1 + usyearly$us[[i + j]]
+  }
+  yravg[i] = prod(sums) ^ (1/10)
+}
+mean(yravg)
+```
+
+
+```{r}
+# Just look at error term scatter plot
+ggplot(diff_inflation, aes(x=Year, y=diff)) + geom_point()
+
+
+# 480x270 for slides, but 960x540 is better for larger scale
+png("InflationHistogramUSTarrodan.png", width=960, height=540, units="px")
+hist(diff_inflation$diff, breaks=20, main="Histogram of Difference in Inflation Rates, US and Tarrodan", xlab="Difference in inflation rate")
+dev.off()
+
+png("InflationDensityUSTarrodan.png", width=960, height=540, units="px")
+plot(density(diff_inflation$diff), main="Density of Difference in Inflation Rates, US and Tarrodan", xlab="Difference in inflation rates")
+dev.off()
+
+png("InflationQQNormUSTarrodan.png", width=960, height=540, units="px")
+qqnorm(diff_inflation$diff)
+dev.off()
+
+with(diff_inflation, ks.test(diff, y="pnorm", mean=mean(diff), sd=sd(diff)))
+```
+
+```{r}
+usovernightraw <- read_xlsx("USOvernight.xlsx")
+usovernight <- usovernightraw |> 
+  select(c(1,2,3))
+colnames(usovernight) <- c("Date", "Type", "Rate")
+usovernight <- usovernight |> 
+  filter(Type == "OBFR") |> 
+  mutate(Date = as.Date(Date, "%m/%d/%Y")) |>
+  mutate(Year = year(Date)) |>
+  group_by(Year) |>
+  summarize(Rate = mean(Rate) / 100) # Is mean best way to summarize
+
+both_overnight <- merge(econdata |> select(Year, Overnight), usovernight, by="Year")
+ggplot(both_overnight |>
+         rename(Tarrodan = Overnight,
+                US = Rate) |>
+         pivot_longer(
+           values_to = "rate",
+           names_to = "country",
+           cols = c(2,3)
+         ), aes(x=Year, y=rate, color=country)) + 
+  geom_line() + 
+  labs(title="Overnight Rate, US and Tarrodan")
+# Due to small amount of data, just say they're close enough
+ggsave("OvernightRates.png", width=1920, height=1080, units="px")
+
+us1yrraw <- read.csv("US1YrSpot.csv")
+us1yr <- us1yrraw |> 
+  mutate(Date = as.Date(observation_date, "%Y-%m-%d")) |>
+  mutate(Year = year(Date)) |>
+  group_by(Year) |>
+  summarize(Rate = mean(DGS1, na.rm=T) / 100)
+
+both_1yr <- merge(econdata |> select(Year, Spot1Yr), us1yr, by="Year")
+ggplot(both_1yr |>
+         rename(Tarrodan = Spot1Yr,
+                US = Rate) |>
+         pivot_longer(
+           values_to = "rate",
+           names_to = "country",
+           cols = c(2,3)
+         ), aes(x=Year, y=rate, color=country)) + 
+  geom_line() + 
+  labs(title="1-Year Spot Rate, US and Tarrodan")
+ggsave("OneYearSpot.png", width=1920, height=1080, units="px")
+
+diff_1yr <- both_1yr |> mutate(diff = Spot1Yr - Rate)
+hist(diff_1yr$diff, breaks=20, main="Histogram of Difference in 1-Year Spot Rates, US and Tarrodan", xlab="Difference in spot rates")
+
+plot(density(diff_1yr$diff), main="Density of Difference in 1-Year Spot Rates, US and Tarrodan", xlab="Difference in spot rates")
+
+qqnorm(diff_1yr$diff)
+qqnorm((diff_1yr |> filter(Year != 1987))$diff)
+# In this case, rather than random noise, it's just so close in almost every case
+# that we just say they're practically the same
+
+  
+us10yrraw <- read.csv("US10YrSpot.csv")
+us10yr <- us10yrraw |> 
+  mutate(Date = as.Date(observation_date, "%Y-%m-%d")) |>
+  mutate(Year = year(Date)) |>
+  group_by(Year) |>
+  summarize(Rate = mean(DGS10, na.rm=T) / 100)
+
+both_10yr <- merge(econdata |> select(Year, Spot10Yr), us10yr, by="Year")
+ggplot(both_10yr |>
+         rename(Tarrodan = Spot10Yr,
+                US = Rate) |>
+         pivot_longer(
+           values_to = "rate",
+           names_to = "country",
+           cols = c(2,3)
+         ), aes(x=Year, y=rate, color=country)) + 
+  geom_line() + 
+  labs(title="10-Year Spot Rate, US and Tarrodan")
+ggsave("TenYearSpot.png", width=1920, height=1080, units="px")
+
+diff_10yr <- both_10yr |> mutate(diff = Spot10Yr - Rate)
+hist(diff_10yr$diff, breaks=20, main="Histogram of Difference in 10-Year Spot Rates, US and Tarrodan", xlab="Difference in spot rates")
+
+plot(density(diff_10yr$diff), main="Density of Difference in 10-Year Spot Rates, US and Tarrodan", xlab="Difference in spot rates")
+
+qqnorm(diff_10yr$diff)
+qqnorm((diff_10yr |> filter(Year != 1987))$diff)
+```
+
+
+
+# Data Cleaning
+
+```{r}
+damdata <- damraw
+
+# Human + machine readable column names
+colnames(damdata) <- c("ID", "Region", "Regulated", "Purpose", "Type", "Height", "Length", "Volume", "YearCompleted", "YearsModified", "Surface", "Drainage", "Spillway", "LastInspection", "InspectionFreq", "DistanceToCity", "Hazard", "Assessment", "AssessmentDate", "ProbFailure", "LGFProperty", "LGFLiability", "LGFBusiness")
+
+# Replace empty string with NA
+damdata <- replace(damdata, damdata == "", NA)
+
+# Modify column types for ease of computing
+damdata <- damdata |> 
+  mutate(
+    Region = as.factor(Region),
+    Regulated = as.factor(Regulated),
+    Purpose = as.factor(Purpose),
+    Type = as.factor(Type),
+    Spillway = as.factor(Spillway),
+    LastInspection = as.Date(LastInspection, format="%d/%m/%Y"),
+    Hazard = factor(Hazard, levels=c("Low", "Significant", "High", "Undetermined")),
+    # UNKNOWN IF THIS PROPER RANKING
+    Assessment = factor(Assessment, levels=c("Unsatisfactory", "Poor", "Fair", "Satisfactory", "Not Rated", "Not Available")),
+    AssessmentDate = as.Date(AssessmentDate, "%d/%m/%Y")
+  ) |> # Set height 0 to missing (since height 0 impossible)
+  mutate(Height = na_if(Height, 0)) |>
+  # LastModified -> max(YearsModified, YearCompleted)
+  mutate(YearsModified = pmax(YearCompleted,
+                             as.numeric(gsub("([0-9]{4}.?)?([0-9]+).*$",
+                                             "\\2", damdata$YearsModified)),
+                             na.rm=T)) |>
+  rename(LastModified = YearsModified)
+
+# An inspection exists with year 2031; assume mistake and set to missing
+damdata$LastInspection[which(year(damdata$LastInspection) == 2031)] <- as.Date(NA)
+```
+
+# Data Exploration
+
+```{r}
+# Getting minimum total loss; rough estimate of yearly loss
+damdata |> mutate(T = rowSums(damdata[21:23], na.rm=T)) |> arrange(T)
+```
+
+```{r}
+# List number of NA's in each column
+sapply(damdata, function(y) sum(length(which(is.na(y)))))
+
+# Proportion of NA's per column
+sapply(damdata, function(y) sum(length(which(is.na(y))))) / nrow(damdata) * 100
+```
+
+```{r}
+# Expected loss (assuming NA = 0)
+damdata |> 
+  mutate(TotalLoss = rowSums(damdata[21:23], na.rm=T)) |>
+  mutate(ExpectedLoss = ProbFailure * TotalLoss)  |> 
+  group_by(Region) |>
+  summarize(Count = n(),
+            RegionalLoss = sum(ExpectedLoss),
+            PropLoss = RegionalLoss / Count)
+
+damdata |> 
+  group_by(Region) |> 
+  summarize(ExpectedFailureCount = sum(ProbFailure))
+
+
+damdata |> group_by(Region) |> summarize(n())
+
+damdata |> 
+  mutate(TotalLoss = rowSums(damdata[21:23], na.rm=T)) |>
+  mutate(ExpectedLoss = ProbFailure * TotalLoss) |> 
+  summarize(MinExpectedLoss = sum(ExpectedLoss))
+
+# Data is in millions
+
+# 775bil/10yr, say 80bil/yr, 
+```
+
+```{r}
+# Yearly calculation
+# Assuming exponential distribution, we are given F(10) and want lambda
+# Or, F(10) = 1-e^{-lambda 10}
+# So, e^{-lambda 10} = 1-F(10)
+# => -lambda 10 = log(1-F(10))
+# => lambda = -log(1-F(10)) / 10
+# ALSO, loss is TotalLoss * R.V. ~ Exp(HazardRate), so E(loss) = TotalLoss * RV
+# Similarly, Var(loss) = Var(TotalLoss*RV) = TotalLoss^2 * RV
+# And, variance of sum is sum of variance for indep, so sum is total variance
+damdata |> 
+  mutate(HazardRate = -log(1-ProbFailure) / 10,
+         TotalLoss = rowSums(damdata[21:23], na.rm=T),
+         ExpectedLoss = TotalLoss * ProbFailure,
+         ExpectedLossOneYr = TotalLoss * (1-exp(-HazardRate)),
+         Variance = TotalLoss^2 * ProbFailure,
+         VarianceOneYr = TotalLoss^2 * (1-exp(-HazardRate))) |>
+  summarize(TenYrLoss = sum(ExpectedLoss),
+            OneYrLoss = sum(ExpectedLossOneYr),
+            TenYrSD = sqrt(sum(Variance)),
+            OneYrSD = sqrt(sum(VarianceOneYr))) |>
+  summarize(OneYrLoss * 1000000 / 94699280,
+            TenYrLoss * 1000000 / 94699280)
+```
+
+# Data Imputation
+
+```{r}
+# Imputing important missing data only
+# Height, assessments of any missing kind, LGF
+
+# Standardization to avoid unsolvable equations
+tempdam <- damdata |> mutate(across(where(is.numeric),  ~(scale(.) %>% as.vector)))
+
+damstats <- damdata |> 
+  summarize_if(is.numeric, list(mean = mean, sd = sd), na.rm=T)
+
+damimpprep <- tempdam |> 
+  mutate(Assessment = ifelse(Assessment %in% c("Unsatisfactory", "Poor", "Fair",
+                                               "Satisfactory"), 
+                             Assessment, 
+                             NA)) |>
+  mutate(Assessment = factor(Assessment, 
+                             levels = c(1,2,3,4),
+                             labels=c("Unsatisfactory", "Poor", "Fair",
+                                      "Satisfactory"))) |>
+  select(-c("LastInspection", "AssessmentDate"))
+
+# No colinear columns, which is desirable
+mice:::find.collinear(damimpprep)
+
+# Quickpred for faster calculation
+init <- mice(damimpprep, pred=quickpred(damimpprep), maxit=0)
+
+pred <- init$predictorMatrix
+# Do not impute on columns of no interest
+pred[1:5, ] = 0
+pred[7:16, ] = 0
+
+impute_cols <- mice(damimpprep, pred=pred, m=3, maxit=30)
+
+# saveRDS(impute_cols, file="imputedObject.RDS")
+
+
+# png("ImputationTraceplots.png", width=960, height=4140, units="px")
+plot(impute_cols, layout=c(2,21))
+# dev.off()
+
+# Doesn't work
+# plot(impute_cols, ~ Height + Assessment + LGFProperty + LGFLiability + LGFBusiness)
+
+# densityplot(impute_cols, ~ Height + Assessment + LGFProperty + LGFLiability + LGFBusiness)
+```
+
+```{r}
+impute_cols <- readRDS("imputedObject.RDS")
+```
+
+```{r}
+# Un-standardize imputed data
+# NOTE: Does not quality check of unreasonable values (such as negatives)
+impeddam <- complete(impute_cols) |> 
+  mutate(Height = (Height * damstats[1, "Height_sd"]) + damstats[1, "Height_mean"], 
+         Length = (Length * damstats[1, "Length_sd"]) + damstats[1, "Length_mean"],
+         Volume = (Volume * damstats[1, "Volume_sd"]) + damstats[1, "Volume_mean"],
+         YearCompleted = (YearCompleted * damstats[1, "YearCompleted_sd"]) + damstats[1, "YearCompleted_mean"],
+         LastModified = (LastModified * damstats[1, "LastModified_sd"]) + damstats[1, "LastModified_mean"],
+         Surface = (Surface * damstats[1, "Surface_sd"]) + damstats[1, "Surface_mean"],
+         Drainage = (Drainage * damstats[1, "Drainage_sd"]) + damstats[1, "Drainage_mean"],
+         InspectionFreq = (InspectionFreq * damstats[1, "InspectionFreq_sd"]) + damstats[1, "InspectionFreq_mean"],
+         DistanceToCity = (DistanceToCity * damstats[1, "DistanceToCity_sd"]) + damstats[1, "DistanceToCity_mean"],
+         LGFProperty = (LGFProperty * damstats[1, "LGFProperty_sd"]) + damstats[1, "LGFProperty_mean"],
+         LGFLiability = (LGFLiability * damstats[1, "LGFLiability_sd"]) + damstats[1, "LGFLiability_mean"],
+         LGFBusiness = (LGFBusiness * damstats[1, "LGFBusiness_sd"]) + damstats[1, "LGFBusiness_mean"],
+         ProbFailure = (ProbFailure * damstats[1, "ProbFailure_sd"]) + damstats[1, "ProbFailure_mean"])
+
+# write.csv(impeddam, "ImputedDamData.csv", row.names=FALSE)
+# impeddam <- read.csv("ImputedDamData.csv")
+```
+
+
+
+```{r}
+height_bins_feet <- c(15, 25, 50, 100, 200)
+hbm <- height_bins_feet / 3.28084 # Convert to meters
+
+# Price bins grouping by height bin within repair type bin
+price_bins_heightsmaller <- c(400, 790, 1410, 1360, 3080, 9180,
+                              1380, 1890, 4000, 4800, 20000, 26340,
+                              2870, 2670, 6230, 8580, 23840, 95300) / (1000*1.048)
+# Converted to Qalkoons at 1.048USD to 1.000Q
+```
+
+
+```{r}
+imped_damcosts <- impeddam |> 
+  mutate(Age = 2025-YearCompleted) |> 
+  mutate(TotalLoss = rowSums(impeddam[19:21], na.rm=T)) |>
+  select(c("Region", "Height", "Age", "Hazard", "Assessment", "ProbFailure", "TotalLoss")) |> 
+  mutate(ExpectedLoss = ProbFailure * TotalLoss) |>
+  mutate(Lambda = -log(1-ProbFailure) / 10) |>
+  mutate(ExpectedLoss1yr = TotalLoss * (1-exp(-Lambda))) |>
+  rename(NewAssessment = Assessment) |> # To fit other code easier
+  mutate(HeightBin = case_when(Height<=hbm[1] ~ 1,
+                               Height>hbm[1] & Height<=hbm[2] ~ 2,
+                               Height>hbm[2] & Height<=hbm[3] ~ 3,
+                               Height>hbm[3] & Height<=hbm[4] ~ 4,
+                               Height>hbm[4] & Height<=hbm[5] ~ 5,
+                               Height>hbm[5] ~ 6)) |> 
+  mutate(RepairBin = case_when(Age<50 & NewAssessment != "Satisfactory" ~ 1,
+                               Age>=50 & NewAssessment == "Fair" ~ 2,
+                               Age>=50 & (NewAssessment == "Poor" | NewAssessment == "Unsatisfactory") ~ 3, .default = 0)) |> 
+  mutate(ExpectedRepair = case_when(RepairBin == 1 ~
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[1],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[2],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[3],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[4],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[5],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[6]
+                                      ),
+                                    RepairBin == 2 ~ 
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[7],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[8],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[9],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[10],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[11],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[12]
+                                      ),
+                                    RepairBin == 3 ~ 
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[13],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[14],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[15],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[16],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[17],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[18]
+                                      ))
+         )
+
+damcosts <- imped_damcosts
+
+```
+
+
+```{r}
+imped_damcosts |> 
+  group_by(Region) |> 
+  summarize(T = sum(ExpectedLoss1yr)) |> 
+  mutate(T = 1000000 * T / c(15911120, 2967382, 16323908))
+
+imped_damcosts |> 
+  summarize(T = sum(ExpectedLoss1yr) * 1000000 / 35202410)
+
+# Year 1 premiums  divided per dam
+```
+
+
+```{r non-imputed}
+# Damcosts for non-imputed data
+assessments <- factor(c("Unsatisfactory", "Poor", "Fair", "Satisfactory"),
+                      levels=c("Unsatisfactory", "Poor", "Fair", "Satisfactory"))
+aprops <- (damdata |>
+  filter(!(is.na(Assessment) | Assessment == "Not Rated" | Assessment == "Not Available")) |>
+  group_by(Region, Assessment) |>
+  summarize(Assessment_Prop = n()) |>
+  mutate(Assessment_Prop = Assessment_Prop / sum(Assessment_Prop)))$Assessment_Prop
+
+set.seed(123)
+damcosts <- damdata |> 
+  mutate(Age = 2025-YearCompleted) |> 
+  mutate(TotalLoss = rowSums(damdata[21:23], na.rm=T)) |>
+  select(c("Region", "Height", "Age", "Hazard", "Assessment", "ProbFailure", "TotalLoss")) |> 
+  mutate(ExpectedLoss = ProbFailure * TotalLoss) |>
+  mutate(Lambda = -log(1-ProbFailure) / 10) |>
+  mutate(ExpectedLoss1yr = TotalLoss * (1-exp(-Lambda))) |>
+  # Assumptions of original pricing method
+  mutate(Age = replace_na(Age, 51)) |> # If age missing, assume older than 50
+  # Replace missing assessment by sampling from regional proportions
+  mutate(NewAssessment = 
+           ifelse(is.na(Assessment) | 
+                    Assessment == "Not Rated" | Assessment == "Not Available",
+                  case_when(Region == "Flumevale" ~ 
+                              sample(assessments, 1, replace=T, prob=aprops[1:4]),
+                            Region == "Lyndrassia" ~ 
+                              sample(assessments, 1, replace=T, prob=aprops[5:8]),
+                            Region == "Navaldia" ~ 
+                              sample(assessments, 1, replace=T, prob=aprops[9:12])),
+         as.factor(Assessment))) |>
+  mutate(NewAssessment = factor(NewAssessment, levels=c(1,2,3,4), labels=c("Unsatisfactory", "Poor", "Fair", "Satisfactory"))) |>
+  mutate(HeightBin = case_when(is.na(Height) ~ 0,
+                               Height<=hbm[1] ~ 1,
+                               Height>hbm[1] & Height<=hbm[2] ~ 2,
+                               Height>hbm[2] & Height<=hbm[3] ~ 3,
+                               Height>hbm[3] & Height<=hbm[4] ~ 4,
+                               Height>hbm[4] & Height<=hbm[5] ~ 5,
+                               Height>hbm[5] ~ 6)) |> 
+  mutate(RepairBin = case_when(Age<50 & NewAssessment != "Satisfactory" ~ 1,
+                               Age>=50 & NewAssessment == "Fair" ~ 2,
+                               Age>=50 & (NewAssessment == "Poor" | NewAssessment == "Unsatisfactory") ~ 3, .default = 0)) |> 
+  mutate(ExpectedRepair = case_when(RepairBin == 1 ~
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[1],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[2],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[3],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[4],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[5],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[6]
+                                      ),
+                                    RepairBin == 2 ~ 
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[7],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[8],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[9],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[10],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[11],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[12]
+                                      ),
+                                    RepairBin == 3 ~ 
+                                      case_when(
+                                        HeightBin == 1 ~ price_bins_heightsmaller[13],
+                                        HeightBin == 2 ~ price_bins_heightsmaller[14],
+                                        HeightBin == 3 ~ price_bins_heightsmaller[15],
+                                        HeightBin == 4 ~ price_bins_heightsmaller[16],
+                                        HeightBin == 5 ~ price_bins_heightsmaller[17],
+                                        HeightBin == 6 ~ price_bins_heightsmaller[18]
+                                      ))
+         )
+
+# Note: This has a few entries with missing heights, 
+# which cannot be given repair costs by the above methodology
+damdata |> filter(is.na(Height))
+```
+
+# Modeling
+
+```{r}
+# Expected total cost of repairs for all dams
+damcosts |>
+  filter(HeightBin != 0) |>
+  filter(RepairBin != 0) |> # Disregard dams with no need for repairs
+  select(-c("RepairBin", "HeightBin")) |>
+  summarize(Rep = sum(ExpectedRepair))
+
+# Calculate average probability of failure for a "satisfactory" dam
+probs_by_region <- (damdata |> 
+  filter(Assessment == "Satisfactory") |>
+  group_by(Region) |>
+  summarize(Probs = mean(ProbFailure)))$Probs
+
+# Calculate expected repair costs + savings for all profitable dams
+damcosts |>
+  mutate(NewProb = case_when(Region == "Flumevale" ~ probs_by_region[1],
+                             Region == "Lyndrassia" ~ probs_by_region[2],
+                             Region == "Navaldia" ~ probs_by_region[3])) |>
+  mutate(ExpectedNewLoss = NewProb * TotalLoss) |>
+  mutate(ExpectedSavings = ExpectedLoss - (ExpectedRepair + ExpectedNewLoss)) |>
+  filter(ExpectedSavings >= 0) |> # Comment out line for all dams
+  summarize(sum(ExpectedRepair), sum(ExpectedSavings))
+```
+
+
+```{r}
+damexps <- damcosts |> 
+  # mutate(NeedsRep = ifelse(RepairBin != 0 | Hazard == "High" | 
+                             # Hazard == "Significant" | ExpectedSavings >= 0, 1, 0)) |>
+  # filter(HeightBin != 0) |> # Only needed for non-imputed
+  # filter(RepairBin != 0) |> # Disregard dams with no need for repairs
+  select(-c("RepairBin", "HeightBin", "Height", "Age")) |>
+  mutate(NewProb = case_when(Region == "Flumevale" ~ probs_by_region[1],
+                             Region == "Lyndrassia" ~ probs_by_region[2],
+                             Region == "Navaldia" ~ probs_by_region[3])) |>
+  mutate(NewLambda = -log(1-NewProb) / 10) |>
+  mutate(NewProbYr = 1-exp(-NewLambda)) |>
+  mutate(ExpectedNewLoss = NewProb * TotalLoss) |>
+  mutate(ExpectedSavings = ExpectedLoss - (ExpectedRepair + ExpectedNewLoss)) |>
+  # Find dams where repair is profitable or hazard is high/significant, 
+  # flag expected savings 
+  mutate(ExpectedSavings = ifelse(
+    ExpectedSavings >= 0 | Hazard == "High" | Hazard == "Significant",
+    ExpectedSavings, NA)
+  ) |>
+  # Adding significant as well only adds ~50 dams of 7.7k (unimputed)
+  # filter(ExpectedSavings >= 0 | Hazard == "High" | Hazard == "Significant") |>
+  mutate(ExpectedNewLossYrly = TotalLoss * NewProbYr) |>
+  # THIS EXPECTED SAVINGS DOES NOT COUNT FOR REPAIR COSTS
+  mutate(ExpectedSavingsYrly = ExpectedLoss1yr - ExpectedNewLossYrly)#  |>
+  arrange(desc(ExpectedSavings))
+```
+
+
+```{r}
+# TODO: Organize code to be easily reproducible
+# Define some functions for sensitivity, like the whole model
+# as a function taking climate change as a parameter,
+# maybe dataset too so we can calc repairs only and full
+# Then save the resulting dataframe as variable, apply to summary/graphing below
+# Also apply inflation/interest parameters to those things
+
+model_dams <- function(damexps, clim_coef) {
+  saving_splits <- quantile(x=(damexps |> 
+    filter(ExpectedSavings >= 0 | Hazard == "High" | Hazard == "Significant"))$ExpectedSavings,
+    c(.9,.8,.7,.6,.5,.4,.3,.2,.1,0),
+    na.rm=T
+  )
+# UNADJUSTED FOR INFLATION
+
+# If repaired, set lambda to minimum of region average and its baseline, 
+# unadjusted for potential climate change
+# This assumption may be flawed, but it's what we're going with
+# If not repaired this year, use previous year's
+# In case satisfactory dams increase from climate change, this is needed
+  damexps |>
+    mutate(RepYr1 = ifelse(ExpectedSavings >= saving_splits[[1]], 1, 0)) |>
+    mutate(AsmntYr1 = if_else(RepYr1 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr1 = if_else(RepYr1 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr1 = case_when(
+      AsmntYr1 == "Satisfactory" ~ LambdaYr1 * clim_coef[1],
+      AsmntYr1 == "Fair" ~ LambdaYr1 * clim_coef[2],
+      AsmntYr1 == "Poor" ~ LambdaYr1 * clim_coef[3],
+      AsmntYr1 == "Unsatisfactory" ~ LambdaYr1 * clim_coef[4]
+      )) |>
+    mutate(ProbYr1 = 1-exp(-LambdaYr1)) |>
+    mutate(ExpectedLossYr1 = TotalLoss * ProbYr1) |>
+    mutate(RepCostYr1 = ifelse(RepYr1 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr1 = ifelse(RepYr1 == 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr2 = ifelse(ExpectedSavings >= saving_splits[[2]], RepYr1 + 1, 0)) |>
+    mutate(AsmntYr2 = if_else(RepYr2 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr2 = if_else(RepYr2 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr2 = case_when(
+      AsmntYr2 == "Satisfactory" ~ LambdaYr2 * clim_coef[1],
+      AsmntYr2 == "Fair" ~ LambdaYr2 * clim_coef[2],
+      AsmntYr2 == "Poor" ~ LambdaYr2 * clim_coef[3],
+      AsmntYr2 == "Unsatisfactory" ~ LambdaYr2 * clim_coef[4]
+      )) |>
+    mutate(ProbYr2 = 1-exp(-LambdaYr2)) |>
+    mutate(ExpectedLossYr2 = TotalLoss * ProbYr2) |>
+    mutate(RepCostYr2 = ifelse(RepYr2 == 1, ExpectedRepair, 0)) |>
+    # NOTE: Savings track cumulatively
+    mutate(SavedYr2 = ifelse(RepYr2 >= 1, ExpectedSavingsYrly, 0)) |>
+  
+    mutate(RepYr3 = ifelse(ExpectedSavings >= saving_splits[[3]], RepYr2 + 1, 0)) |>
+    mutate(AsmntYr3 = if_else(RepYr3 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr3 = if_else(RepYr3 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr3 = case_when(
+      AsmntYr3 == "Satisfactory" ~ LambdaYr3 * clim_coef[1],
+      AsmntYr3 == "Fair" ~ LambdaYr3 * clim_coef[2],
+      AsmntYr3 == "Poor" ~ LambdaYr3 * clim_coef[3],
+      AsmntYr3 == "Unsatisfactory" ~ LambdaYr3 * clim_coef[4]
+      )) |>
+    mutate(ProbYr3 = 1-exp(-LambdaYr3)) |>
+    mutate(ExpectedLossYr3 = TotalLoss * ProbYr3) |>
+    mutate(RepCostYr3 = ifelse(RepYr3 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr3 = ifelse(RepYr3 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr4 = ifelse(ExpectedSavings >= saving_splits[[4]], RepYr3 + 1, 0)) |>
+    mutate(AsmntYr4 = if_else(RepYr4 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr4 = if_else(RepYr4 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr4 = case_when(
+      AsmntYr4 == "Satisfactory" ~ LambdaYr4 * clim_coef[1],
+      AsmntYr4 == "Fair" ~ LambdaYr4 * clim_coef[2],
+      AsmntYr4 == "Poor" ~ LambdaYr4 * clim_coef[3],
+      AsmntYr4 == "Unsatisfactory" ~ LambdaYr4 * clim_coef[4]
+      )) |>
+    # mutate(ProbYr4 = ifelse(RepYr4 == 1, NewProbYr, 1-exp(-LambdaYr4))) |>
+    mutate(ProbYr4 = 1-exp(-LambdaYr4)) |>
+    mutate(ExpectedLossYr4 = TotalLoss * ProbYr4) |>
+    mutate(RepCostYr4 = ifelse(RepYr4 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr4 = ifelse(RepYr4 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr5 = ifelse(ExpectedSavings >= saving_splits[[5]], RepYr4 + 1, 0)) |>
+    mutate(AsmntYr5 = if_else(RepYr5 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr5 = if_else(RepYr5 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr5 = case_when(
+      AsmntYr5 == "Satisfactory" ~ LambdaYr5 * clim_coef[1],
+      AsmntYr5 == "Fair" ~ LambdaYr5 * clim_coef[2],
+      AsmntYr5 == "Poor" ~ LambdaYr5 * clim_coef[3],
+      AsmntYr5 == "Unsatisfactory" ~ LambdaYr5 * clim_coef[4]
+      )) |>
+    mutate(ProbYr5 = 1-exp(-LambdaYr5)) |>
+    mutate(ExpectedLossYr5 = TotalLoss * ProbYr5) |>
+    mutate(RepCostYr5 = ifelse(RepYr5 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr5 = ifelse(RepYr5 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr6 = ifelse(ExpectedSavings >= saving_splits[[6]], RepYr5 + 1, 0)) |>
+    mutate(AsmntYr6 = if_else(RepYr6 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr6 = if_else(RepYr6 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr6 = case_when(
+      AsmntYr6 == "Satisfactory" ~ LambdaYr6 * clim_coef[1],
+      AsmntYr6 == "Fair" ~ LambdaYr6 * clim_coef[2],
+      AsmntYr6 == "Poor" ~ LambdaYr6 * clim_coef[3],
+      AsmntYr6 == "Unsatisfactory" ~ LambdaYr6 * clim_coef[4]
+      )) |>
+    mutate(ProbYr6 = 1-exp(-LambdaYr6)) |>
+    mutate(ExpectedLossYr6 = TotalLoss * ProbYr6) |>
+    mutate(RepCostYr6 = ifelse(RepYr6 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr6 = ifelse(RepYr6 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr7 = ifelse(ExpectedSavings >= saving_splits[[7]], RepYr6 + 1, 0)) |>
+    mutate(AsmntYr7 = if_else(RepYr7 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr7 = if_else(RepYr7 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr7 = case_when(
+      AsmntYr7 == "Satisfactory" ~ LambdaYr7 * clim_coef[1],
+      AsmntYr7 == "Fair" ~ LambdaYr7 * clim_coef[2],
+      AsmntYr7 == "Poor" ~ LambdaYr7 * clim_coef[3],
+      AsmntYr7 == "Unsatisfactory" ~ LambdaYr7 * clim_coef[4]
+      )) |>
+    mutate(ProbYr7 = 1-exp(-LambdaYr7)) |>
+    mutate(ExpectedLossYr7 = TotalLoss * ProbYr7) |>
+    mutate(RepCostYr7 = ifelse(RepYr7 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr7 = ifelse(RepYr7 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr8 = ifelse(ExpectedSavings >= saving_splits[[8]], RepYr7 + 1, 0)) |>
+    mutate(AsmntYr8 = if_else(RepYr8 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr8 = if_else(RepYr8 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr8 = case_when(
+      AsmntYr8 == "Satisfactory" ~ LambdaYr8 * clim_coef[1],
+      AsmntYr8 == "Fair" ~ LambdaYr8 * clim_coef[2],
+      AsmntYr8 == "Poor" ~ LambdaYr8 * clim_coef[3],
+      AsmntYr8 == "Unsatisfactory" ~ LambdaYr8 * clim_coef[4]
+      )) |>
+    mutate(ProbYr8 = 1-exp(-LambdaYr8)) |>
+    mutate(ExpectedLossYr8 = TotalLoss * ProbYr8) |>
+    mutate(RepCostYr8 = ifelse(RepYr8 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr8 = ifelse(RepYr8 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr9 = ifelse(ExpectedSavings >= saving_splits[[9]], RepYr8 + 1, 0)) |>
+    mutate(AsmntYr9 = if_else(RepYr9 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr9 = if_else(RepYr9 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr9 = case_when(
+      AsmntYr9 == "Satisfactory" ~ LambdaYr9 * clim_coef[1],
+      AsmntYr9 == "Fair" ~ LambdaYr9 * clim_coef[2],
+      AsmntYr9 == "Poor" ~ LambdaYr9 * clim_coef[3],
+      AsmntYr9 == "Unsatisfactory" ~ LambdaYr9 * clim_coef[4]
+      )) |>
+    mutate(ProbYr9 = 1-exp(-LambdaYr9)) |>
+    mutate(ExpectedLossYr9 = TotalLoss * ProbYr9) |>
+    mutate(RepCostYr9 = ifelse(RepYr9 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr9 = ifelse(RepYr9 >= 1, ExpectedSavingsYrly, 0)) |>
+    
+    mutate(RepYr10 = ifelse(ExpectedSavings >= saving_splits[[10]], RepYr9 + 1, 0)) |>
+    mutate(AsmntYr10 = if_else(RepYr10 == 1, 
+                                factor(4, levels=c(1,2,3,4), labels=c("Unsatisfactory","Poor","Fair","Satisfactory")), 
+                                NewAssessment, missing=NewAssessment)) |>
+    mutate(LambdaYr10 = if_else(RepYr10 == 1, pmin(Lambda, NewLambda), Lambda, missing=Lambda)) |>
+    mutate(LambdaYr10 = case_when(
+      AsmntYr10 == "Satisfactory" ~ LambdaYr10 * clim_coef[1],
+      AsmntYr10 == "Fair" ~ LambdaYr10 * clim_coef[2],
+      AsmntYr10 == "Poor" ~ LambdaYr10 * clim_coef[3],
+      AsmntYr10 == "Unsatisfactory" ~ LambdaYr10 * clim_coef[4]
+      )) |>
+    mutate(ProbYr10 = 1-exp(-LambdaYr10)) |>
+    mutate(ExpectedLossYr10 = TotalLoss * ProbYr10) |>
+    mutate(RepCostYr10 = ifelse(RepYr10 == 1, ExpectedRepair, 0)) |>
+    mutate(SavedYr10 = ifelse(RepYr10 >= 1, ExpectedSavingsYrly, 0))
+}
+```
+
+
+```{r}
+# TODO: Need to also model expected loss changes for ALL dams,
+# and repair/savings costs for repaired dams only
+# Keep in mind damexps only includes dams that require repairs
+
+# TODO: Expected savings is not adjusted for new probability of failure
+# Adjust lambda for each year? ProbYr2 needs to be >=1 for clim_coef[1]==1 or
+# need to adjust lambda for repaired dams
+# ^^^ Not going to do this, which makes expected savings a conservative estimate
+# Make sure to note this assumption in writing
+
+# TODO: plot bond interest to show ability to pay it off?
+
+# Satisfactory, Fair, Poor, Unsatisfactory
+clim_coef <- c(1, 1.001, 1.005, 1.01)
+# clim_coef <- c(1, 1.0005, 1.0025, 1.005)
+# clim_coef <- c(1, 1.0015, 1.01, 1.015)
+
+yearly_inflation <- 1.03
+
+dam_model_climate_low <- model_dams(damexps, c(1, 1.0005, 1.0025, 1.005))
+dam_model_climate_mid <- model_dams(damexps, c(1,1.001, 1.005, 1.01))
+dam_model_climate_high <- model_dams(damexps, c(1,1.002, 1.01, 1.02))
+
+
+
+dam_model_climate_mid |>
+  group_by(Region) |>
+  filter(RepYr10 >= 1) |>
+  summarize(Count = n(),
+            RepCost = sum(ExpectedRepair))
+
+damcosts |> group_by(Region) |> summarize(L = sum(ExpectedLoss), LProp = sum(ExpectedLoss) / n())
+
+
+summary(impeddam)
+unique(damdata$Assessment)
+```
+
+
+
+```{r}
+# Calculate variance for ELYi, Si, Ri
+dam_model_climate_mid |> 
+  mutate(VarLossYr1 = TotalLoss^2 * ProbYr1) |>
+  mutate(VarLossYr2 = TotalLoss^2 * ProbYr2) |>
+  mutate(VarLossYr3 = TotalLoss^2 * ProbYr3) |>
+  mutate(VarLossYr4 = TotalLoss^2 * ProbYr4) |>
+  mutate(VarLossYr5 = TotalLoss^2 * ProbYr5) |>
+  mutate(VarLossYr6 = TotalLoss^2 * ProbYr6) |>
+  mutate(VarLossYr7 = TotalLoss^2 * ProbYr7) |>
+  mutate(VarLossYr8 = TotalLoss^2 * ProbYr8) |>
+  mutate(VarLossYr9 = TotalLoss^2 * ProbYr9) |>
+  mutate(VarLossYr10 = TotalLoss^2 * ProbYr10) |>
+  summarize(SD1 = sqrt(sum(VarLossYr1)),
+            VL2 = sqrt(sum(VarLossYr2)),
+            VL3 = sqrt(sum(VarLossYr3)),
+            VL4 = sqrt(sum(VarLossYr4)),
+            VL5 = sqrt(sum(VarLossYr5)),
+            VL6 = sqrt(sum(VarLossYr6)),
+            VL7 = sqrt(sum(VarLossYr7)),
+            VL8 = sqrt(sum(VarLossYr8)),
+            VL9 = sqrt(sum(VarLossYr9)),
+            VL10 = sqrt(sum(VarLossYr10)))
+
+dam_model_climate_mid |> 
+  summarize(EL1 = sum(ExpectedLossYr1))
+
+77487.18 + 2 * 7578.154
+```
+
+```{r}
+dam_end_amt <- function(dam_model, inflation, interest) {
+  dam_summary <- dam_model |> 
+    summarize(EL1 = sum(ExpectedLossYr1, na.rm=T),
+              S1 = sum(SavedYr1, na.rm=T),
+              R1 = sum(RepCostYr1, na.rm=T),
+              EL2 = sum(ExpectedLossYr2, na.rm=T),
+              S2 = sum(SavedYr2, na.rm=T),
+              R2 = sum(RepCostYr2, na.rm=T),
+              EL3 = sum(ExpectedLossYr3, na.rm=T),
+              S3 = sum(SavedYr3, na.rm=T),
+              R3 = sum(RepCostYr3, na.rm=T),
+              EL4 = sum(ExpectedLossYr4, na.rm=T),
+              S4 = sum(SavedYr4, na.rm=T),
+              R4 = sum(RepCostYr4, na.rm=T),
+              EL5 = sum(ExpectedLossYr5, na.rm=T),
+              S5 = sum(SavedYr5, na.rm=T),
+              R5 = sum(RepCostYr5, na.rm=T),
+              EL6 = sum(ExpectedLossYr6, na.rm=T),
+              S6 = sum(SavedYr6, na.rm=T),
+              R6 = sum(RepCostYr6, na.rm=T),
+              EL7 = sum(ExpectedLossYr7, na.rm=T),
+              S7 = sum(SavedYr7, na.rm=T),
+              R7 = sum(RepCostYr7, na.rm=T),
+              EL8 = sum(ExpectedLossYr8, na.rm=T),
+              S8 = sum(SavedYr8, na.rm=T),
+              R8 = sum(RepCostYr8, na.rm=T),
+              EL9 = sum(ExpectedLossYr9, na.rm=T),
+              S9 = sum(SavedYr9, na.rm=T),
+              R9 = sum(RepCostYr9, na.rm=T),
+              EL10 = sum(ExpectedLossYr10, na.rm=T),
+              S10 = sum(SavedYr10, na.rm=T),
+              R10 = sum(RepCostYr10, na.rm=T)) |>
+    pivot_longer(
+      cols=everything(),
+      names_to=c("Type", "Year"),
+      names_pattern="([S|EL|R])([0-9]{1,2})",
+      values_to="Amount"
+    ) |>
+    mutate(Year = as.numeric(Year)) |> 
+    pivot_wider(
+      names_from=Type,
+      values_from=Amount
+    ) |>
+    rename(EL = L) |>
+    mutate(R = R * inflation ^ (Year - 1),
+           S = S * inflation ^ (Year - 1),
+           EL = EL * inflation ^ (Year - 1),
+           TotalSavings = S * interest ^ Year)
+  # Untested annuity
+  # |>
+  #   mutate(IntS = S * interest ^ seq(9:0))
+  # TODO: TotalSavings NOT CUMULATIVELY SUMMED,
+  # ALSO DOES NOT SUBTRACT REPAIR COSTS OR BOND SPENDING
+  return(dam_summary)
+}
+
+# Rates:
+# 10yr inflation max avg is 9.2847%, min avg is 1.5671%
+# 10yr interest max is 17.41%, min is .97%, avg is 6.71%
+# 1yr avg is 4.3%
+
+# Inflation: 3% expected (because US), 
+yravg = c(NA)
+for(i in seq(1:(nrow(econdata)-9))) {
+  sums = c(NA)
+  for(j in 1:10) {
+    sums[j] = 1 + econdata$Inflation[[i + j - 1]]
+  }
+  
+  yravg[i] = prod(sums) ^ (1/10)
+}
+infmin <- min(yravg)
+infmax <- max(yravg)
+
+
+yravg = c(NA)
+for(i in seq(1:(nrow(econdata)-9))) {
+  sums = c(NA)
+  for(j in 1:10) {
+    sums[j] = 1 + econdata$Spot1Yr[[i + j - 1]]
+  }
+  
+  yravg[i] = prod(sums) ^ (1/10)
+}
+intmin <- min(yravg)
+intavg <- mean(yravg)
+intmax <- max(yravg)
+
+# inflationrates <- as.numeric(1 + (econdata |> 
+#   summarize(mininf = min(Inflation), 
+#             avginf = mean(Inflation),
+#             maxinf = max(Inflation)))[1,])
+# Mid could be us 10-yr avg, 2.212306%
+inflationrates <- c(infmin, 1.03, infmax)
+
+oneyrrates <- as.numeric((econdata |> 
+  summarize(min1yr = intmin,
+            avg1yr = intavg,
+            max1yr = intmax))[1,])
+
+dam_summary_low_inf <- dam_end_amt(dam_model_climate_mid, 
+                                   inflationrates[1], oneyrrates[2])
+dam_summary_mid_inf <- dam_end_amt(dam_model_climate_mid, 
+                                   inflationrates[2], oneyrrates[2])
+dam_summary_high_inf <- dam_end_amt(dam_model_climate_mid, 
+                                    inflationrates[3], oneyrrates[2])
+
+dam_summary_low_int <- dam_end_amt(dam_model_climate_mid, 
+                                   inflationrates[2], oneyrrates[1])
+dam_summary_mid_int <- dam_end_amt(dam_model_climate_mid, 
+                                   inflationrates[2], oneyrrates[2])
+dam_summary_high_int <- dam_end_amt(dam_model_climate_mid, 
+                                    inflationrates[2],  oneyrrates[3])
+
+# TODO:
+# Will there be enough savings to pay off bond at end?
+# How much can acceptably be reserved 
+
+dam_end_amt(dam_model_climate_low, inflationrates[2], oneyrrates[2])
+
+# TODO: For sensitivity analysis, need to adjust inflation so every number is in 
+# 2035(4?) Qalkoons
+interest = oneyrrates[2]
+dam_summary_mid_inf |> mutate(IntS = S * interest ^ rev(seq(0:9))) |>
+  summarize(TS = sum(IntS))
+
+# Maybe moving average to get 2025 10-yr spot rate?
+
+
+impeddam
+```
+
+```{r}
+# Bond amount
+dam_summary_mid_inf |> 
+  mutate(IntR = R / interest ^ (Year - 1)) |>
+  summarize(TR = sum(IntR))
+  # mutate(TR = TR * 1.0103) # TODO: Underwriting fee?
+
+library(forecast)
+ma_10yr <- auto.arima(econdata$Spot10Yr)
+ma_10yr
+ts.plot(econdata$Spot10Yr)
+tenyrint <- forecast(ma_10yr)$mean[1]
+tenyrint
+
+econdata[63, "Spot10Yr"]
+
+ma_1yr <- auto.arima(econdata$Spot1Yr)
+oneyrint <- forecast(ma_1yr)$mean[1]
+oneyrint
+
+econdata[63, "Spot1Yr"]
+```
+
+
+Bond amount – Program setup cost (underwriting cost + setup cost + labor cost) + repair costs for all ten(?) years, 10 year interest rate for redemption value
+Analysis – Inflow pays for inspection costs, expected repair, 95% interval on expected loss including climate change; expected savings to pay off bond
+
+
+
+Bond notes:
+given country's wealth and similarity to US, assume currency stable and can issue bonds in our currency
+bonds in own country, compare to own country rates; overseas compare to overseas rates
+selling bond in own country backed by legislature; risk-free and can use rates
+assume bonds backed by full government, risk-free, country big enough to have robust bond
+assume paying out 10yr, investment yield 1yr
+
+
+
+```{r}
+damsums <- dam_model_climate_mid |>
+  summarize(EL1 = sum(ExpectedLossYr1),
+            S1 = sum(SavedYr1),
+            R1 = sum(RepCostYr1),
+            EL2 = sum(ExpectedLossYr2),
+            S2 = sum(SavedYr2),
+            R2 = sum(RepCostYr2),
+            EL3 = sum(ExpectedLossYr3),
+            S3 = sum(SavedYr3),
+            R3 = sum(RepCostYr3),
+            EL4 = sum(ExpectedLossYr4),
+            S4 = sum(SavedYr4),
+            R4 = sum(RepCostYr4),
+            EL5 = sum(ExpectedLossYr5),
+            S5 = sum(SavedYr5),
+            R5 = sum(RepCostYr5),
+            EL6 = sum(ExpectedLossYr6),
+            S6 = sum(SavedYr6),
+            R6 = sum(RepCostYr6),
+            EL7 = sum(ExpectedLossYr7),
+            S7 = sum(SavedYr7),
+            R7 = sum(RepCostYr7),
+            EL8 = sum(ExpectedLossYr8),
+            S8 = sum(SavedYr8),
+            R8 = sum(RepCostYr8),
+            EL9 = sum(ExpectedLossYr9),
+            S9 = sum(SavedYr9),
+            R9 = sum(RepCostYr9),
+            EL10 = sum(ExpectedLossYr10),
+            S10 = sum(SavedYr10),
+            R10 = sum(RepCostYr10)) 
+
+damsumsyrly <- damsums |>
+  pivot_longer(
+    cols=everything(),
+    names_to=c("Type", "Year"),
+    names_pattern="([S|EL|R])([0-9]{1,2})",
+    values_to="Amount"
+  ) |>
+  mutate(Year = as.numeric(Year)) |>
+```
+
+```{r}
+# Nice looking table, bad for graphing
+damsumsyrly |> 
+  pivot_wider(
+    names_from=Type,
+    values_from=Amount
+  ) |>
+  rename(EL = L)
+
+
+dam_model_climate_mid |> 
+    summarize(EL1 = sum(ExpectedLossYr1, na.rm=T),
+              S1 = sum(SavedYr1, na.rm=T),
+              R1 = sum(RepCostYr1, na.rm=T),
+              EL2 = sum(ExpectedLossYr2, na.rm=T),
+              S2 = sum(SavedYr2, na.rm=T),
+              R2 = sum(RepCostYr2, na.rm=T),
+              EL3 = sum(ExpectedLossYr3, na.rm=T),
+              S3 = sum(SavedYr3, na.rm=T),
+              R3 = sum(RepCostYr3, na.rm=T),
+              EL4 = sum(ExpectedLossYr4, na.rm=T),
+              S4 = sum(SavedYr4, na.rm=T),
+              R4 = sum(RepCostYr4, na.rm=T),
+              EL5 = sum(ExpectedLossYr5, na.rm=T),
+              S5 = sum(SavedYr5, na.rm=T),
+              R5 = sum(RepCostYr5, na.rm=T),
+              EL6 = sum(ExpectedLossYr6, na.rm=T),
+              S6 = sum(SavedYr6, na.rm=T),
+              R6 = sum(RepCostYr6, na.rm=T),
+              EL7 = sum(ExpectedLossYr7, na.rm=T),
+              S7 = sum(SavedYr7, na.rm=T),
+              R7 = sum(RepCostYr7, na.rm=T),
+              EL8 = sum(ExpectedLossYr8, na.rm=T),
+              S8 = sum(SavedYr8, na.rm=T),
+              R8 = sum(RepCostYr8, na.rm=T),
+              EL9 = sum(ExpectedLossYr9, na.rm=T),
+              S9 = sum(SavedYr9, na.rm=T),
+              R9 = sum(RepCostYr9, na.rm=T),
+              EL10 = sum(ExpectedLossYr10, na.rm=T),
+              S10 = sum(SavedYr10, na.rm=T),
+              R10 = sum(RepCostYr10, na.rm=T)) |>
+    pivot_longer(
+      cols=everything(),
+      names_to=c("Type", "Year"),
+      names_pattern="([S|EL|R])([0-9]{1,2})",
+      values_to="Amount"
+    ) |>
+    # mutate(R = R / inflation ^ (Year - 1),
+      #      S = S / inflation ^ Year,
+      #      EL = EL / inflation ^ (Year - 1),
+      #      IntS = S * interest ^ seq(9:0)) |> 
+  mutate(Year = as.numeric(Year)) |>
+  ggplot(aes(x=Year, y=Amount, color=Type)) + 
+    geom_point() +
+    geom_line() +
+    labs(title="Expected Loss and Savings over time",
+         subtitle = "Data in millions of Qalkoons") +
+    scale_x_continuous(breaks=seq(1,10), labels=seq(1,10)) + 
+    scale_y_continuous(breaks=seq(0,1000000,5000)) + 
+    scale_color_discrete(labels=c("Loss", "Repair", "Savings"))
+    
+ggsave("DamLossSavingsTimeFull.png", width=1920, height=1080, units="px")
+```
+

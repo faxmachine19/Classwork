@@ -1,0 +1,1031 @@
+---
+  title: "Forecasting USM Enrollment"
+  author: "Eric O'Leary"
+---
+
+# Project Description
+
+This is a largely unorganized workbook that was used to forecast USM enrollment rates.
+This project was conducted as independent research for MATH 688 at Towson University, a graduate seminar course.
+For an accurate portrayal of the research and results, please see the full paper.
+
+# Active Code
+
+```{r}
+library(tidyverse)
+library(forecast)
+library(tseries)
+```
+
+```{r}
+usmraw <- read.csv("usmenrollment.csv", skip=1)
+```
+
+
+```{r}
+usm <- usmraw[1:nrow(usmraw)-1,]
+
+long_usm <- usm |> 
+  mutate(School = rep(unique(School)[-2], times=1, each=3)) |>
+  pivot_longer(
+    cols = 3:ncol(usmraw),
+    names_to = "Year",
+    values_to = "Count"
+  ) |> 
+  mutate(Year = as.numeric(substr(Year, 2, 5)),
+         Count = as.numeric(sub(",", "", Count))) |> 
+  mutate(School = gsub(" ", "", School))
+  
+wide_usm <- long_usm |> 
+  pivot_wider(
+    names_from = c(School, Level),
+    names_sep = "_",
+    values_from = Count
+  )
+wide_usm
+```
+
+
+```{r}
+usm_totals <- long_usm |> 
+          filter(School == "USMTotals",
+                 Level == "Total") |> 
+          select(c(3,4))
+
+ts.plot(usm_totals[2])
+
+
+unique(long_usm$School)
+short_unis = c("USM Total", "Bowie State", "Coppin State", "Frostburg", "Salisbury", 
+               "Towson", "UBalt", "UMGC", "UMBalt", "UMBC", "UMD", "Eastern Shore")
+
+# long_usm |> mutate(School = rep(short_unis, each=141))
+
+long_usm |> 
+  mutate(School = rep(short_unis, each=141)) |>
+  filter(Level == "Total",
+         School != "USM Total") |> 
+  ggplot(aes(x=Year, y=Count, color=School)) + 
+    geom_line(lwd = .75) + 
+    labs(title="Total Enrollment at USM Schools, 1978-2024",
+         subtitle = "Combined undergraduate and graduate")
+ggsave("USMEnrollRaw.png", width=8, height=4, dpi=300)
+# UMGC is clear outlier in trend
+# Most small and similar, 4 that are outside the pack
+```
+
+```{r}
+long_usm |> 
+  filter(Level == "Undergraduate",
+         School != "USMTotals") |> 
+  ggplot(aes(x=Year, y=Count, color=School)) + 
+    geom_line(lwd = .75) + 
+    labs(title="Undergraduate Enrollment at USM Schools")
+
+
+long_usm |> 
+  filter(Level == "Graduate",
+         School != "USMTotals") |> 
+  ggplot(aes(x=Year, y=Count, color=School)) + 
+    geom_line(lwd = .75) + 
+    labs(title="Graduate Enrollment at USM Schools")
+
+
+ts.plot(long_usm |> filter(Level == "Undergraduate", School == "USMTotals") |> select(Count))
+ts.plot(long_usm |> filter(Level == "Graduate", School == "USMTotals") |> select(Count))
+
+wide_usm_nogc <- wide_usm |>
+  select(matches("(Year|USM|Global)"))
+wide_usm_nogc[, 2] = wide_usm_nogc[, 2] - wide_usm_nogc[, 5]
+wide_usm_nogc[, 3] = wide_usm_nogc[, 3] - wide_usm_nogc[, 6]
+wide_usm_nogc[, 4] = wide_usm_nogc[, 4] - wide_usm_nogc[, 7]
+wide_usm_nogc <- wide_usm_nogc |> select(-c(5,6,7))
+wide_usm_nogc
+
+ts.plot(wide_usm_nogc[2], main="Undergraduate")
+ts.plot(wide_usm_nogc[3], main="Graduate")
+ts.plot(wide_usm_nogc[4], main="Total")
+```
+
+```{r}
+# Modeling USM undergrad, grad, total; with and without GC
+
+usm_ugrad <- wide_usm$USMTotals_Undergraduate
+usm_grads <- wide_usm$USMTotals_Graduate
+usm_total <- wide_usm$USMTotals_Total
+
+
+usm_ugrad_nogc <- wide_usm_nogc$USMTotals_Undergraduate
+usm_grads_nogc <- wide_usm_nogc$USMTotals_Graduate
+usm_total_nogc <- wide_usm_nogc$USMTotals_Total
+```
+
+
+
+```{r}
+# USM Undergrads
+adf.test(usm_ugrad)
+adf.test(diff(usm_ugrad)) # Stationary
+kpss.test(diff(usm_ugrad)) 
+ts.plot(diff(usm_ugrad))
+acf(diff(usm_ugrad))
+pacf(diff(usm_ugrad))
+# Expecting d=1, p=1
+
+
+# USM Graduates
+adf.test(usm_grads)
+adf.test(diff(usm_grads)) # p=.06
+adf.test(diff(diff(usm_grads))) # Stationary
+kpss.test(diff(diff(usm_grads)))
+ts.plot(diff(diff(usm_grads)))
+acf(diff(diff(usm_grads)))
+pacf(diff(diff(usm_grads)))
+# Expecting d=2
+
+
+# USM Total
+adf.test(usm_total)
+adf.test(diff(usm_total)) # Stationary
+kpss.test(diff(usm_total))
+ts.plot(diff(usm_total))
+acf(diff(usm_total))
+pacf(diff(usm_total))
+# Expecting d=1, p=1, maybe q=1
+
+
+
+
+# Excluding Global Campus, Undergrads
+adf.test(usm_ugrad_nogc)
+adf.test(diff(usm_ugrad_nogc))
+adf.test(diff(diff(usm_ugrad_nogc))) # Stationary
+kpss.test(diff(diff(usm_ugrad_nogc)))
+ts.plot(diff(diff(usm_ugrad_nogc)))
+acf(diff(diff(usm_ugrad)))
+pacf(diff(diff(usm_ugrad)))
+# Expecting d=2, p=1, maybe q=1
+
+
+
+# Excluding Global Campus, Graduates
+adf.test(usm_grads_nogc)
+adf.test(diff(usm_grads_nogc)) # Stationary
+kpss.test(diff(usm_grads_nogc))
+ts.plot(diff(usm_grads_nogc))
+acf(diff(usm_grads_nogc))
+pacf(diff(usm_grads_nogc))
+# Might prefer to do d=2
+adf.test(diff(diff(usm_grads_nogc))) 
+acf(diff(diff(usm_grads_nogc)))
+
+
+
+# Excluding Global Campus, Total
+adf.test(usm_total_nogc)
+adf.test(diff(usm_total_nogc))
+adf.test(diff(diff(usm_total_nogc))) # Stationary
+kpss.test(diff(diff(usm_total_nogc)))
+ts.plot(diff(diff(usm_total_nogc)))
+acf(diff(diff(usm_total_nogc)))
+pacf(diff(diff(usm_total_nogc)))
+# Expecting d=2
+
+
+
+auto.arima(usm_ugrad)
+auto.arima(usm_grads)
+auto.arima(usm_total)
+
+auto.arima(usm_ugrad_nogc)
+auto.arima(usm_grads_nogc)
+auto.arima(usm_total_nogc)
+```
+
+
+
+
+
+
+```{r}
+# Undergraduate models
+wide_usm
+
+uni <- unis[7]
+
+curr_ug <- ts(wide_usm[, paste0(uni, "_Undergraduate")])
+
+ts.plot(curr_ug, main=paste0(uni, "_Undergraduate"))
+
+d = 2
+
+ts.plot(diff(curr_ug, difference=d))
+adf.test(diff(curr_ug, difference=d))
+kpss.test(diff(curr_ug, difference=d))
+
+curr_ug_d <- diff(curr_ug, difference=d)
+
+acf(curr_ug_d)
+pacf(curr_ug_d)
+
+auto.arima(curr_ug)
+Arima(curr_ug, c(1,2,0))
+
+plot(forecast(auto.arima(curr_ug)))
+plot(forecast(Arima(curr_ug, c(3,3,0))))
+
+checkresiduals(auto.arima(curr_ug))
+checkresiduals(Arima(curr_ug, c(3,3,0)))
+
+
+# TO REVIEW: Bowie, Coppin, UBalt, UMGC, UMCP; rest if time
+models_ug <- list()
+# Undergrad Findings:
+# Bowie State has trend, stationary at d=2 for adf, d=1 for kpss
+# (1,2,0) with drift we suspect (can't do drift for d>1)
+# AIC and auto.arima shows (0,1,0) with drift is comparable to (1,2,0) but has better prediction
+# (1,2,0) more complex but better residuals; (0,1,0) has autocorrelated residuals
+models_ug[[ unis[1] ]] <- Arima(ts(wide_usm[, paste0(unis[1], "_Undergraduate")]), c(1,2,0))
+# Coppin has no trend, stationary at d=2
+# (2,2,0) we suspect
+# (2,2,0) better AIC than auto's (0,1,1), also more reasonable prediction but worse forecast error
+# Residuals okay for both, look better for auto
+models_ug[[ unis[2] ]] <- Arima(ts(wide_usm[, paste0(unis[2], "_Undergraduate")]), c(0,1,1))
+# Frostburg looks like Coppin, stationary at d=2
+# (0,2,0) we suspect
+# ! (1,2,1) is better AIC and better forecasting
+# No issues with residuals
+models_ug[[ unis[3] ]] <- Arima(ts(wide_usm[, paste0(unis[3], "_Undergraduate")]), c(1,2,1))
+# Salisbury is barely not stationary (adf) at d=2
+# ! (1,2,0) we suspect
+# auto agrees! 
+# Residuals fine
+models_ug[[ unis[4] ]] <- Arima(ts(wide_usm[, paste0(unis[4], "_Undergraduate")]), c(1,2,0))
+# Towson looks like Salisbury, stationary at d=2
+# (1,2,0) we suspect, but spikes are BARELY significant
+# ! auto gives (1,1,0), much less forecasting error and better AIC
+# Residuals fine
+models_ug[[ unis[5] ]] <- Arima(ts(wide_usm[, paste0(unis[5], "_Undergraduate")]), c(1,1,0))
+# UBalt needs d=3 for stationarity to adf
+# (2,3,0) we suspect tentatively
+# auto gives (2,0,0) with mean, forecast looks funky, so does (2,3,0) forecast
+# both residuals fine
+models_ug[[ unis[6] ]] <- Arima(ts(wide_usm[, paste0(unis[6], "_Undergraduate")]), c(2,3,0))
+# UMGC needs d=2 for stationarity, but variance increases over time
+# (1,2,0) suspected
+# (0,2,1) has better AIC and less forecast error, both reasonable choices
+# Residuals not superb for either option, but no autocorrelation for either
+models_ug[[ unis[7] ]] <- Arima(ts(wide_usm[, paste0(unis[7], "_Undergraduate")]), c(0,2,1))
+# UMBalt stationary at d=1
+# ! (0,1,0) suspect
+# auto agrees!
+# residuals are autocorrelated
+models_ug[[ unis[8] ]] <- Arima(ts(wide_usm[, paste0(unis[8], "_Undergraduate")]), c(0,1,0))
+# UMBC stationary at d=2
+# (1,2,0) suspect
+# auto says (0,2,1), not a big difference
+# residuals fine for both
+models_ug[[ unis[9] ]] <- Arima(ts(wide_usm[, paste0(unis[9], "_Undergraduate")]), c(0,2,1))
+# UMCP stationary at d=2
+# (0,2,0)
+# auto gets (1,2,1) 
+# auto has nicer looking residuals but not by a ton
+models_ug[[ unis[10] ]] <- Arima(ts(wide_usm[, paste0(unis[10], "_Undergraduate")]), c(0,2,0))
+# Eastern Shore adf has p=.06 for d=2, stationary at d=3
+# (3,3,0) ish suspect | at d=2, (1,2,0); (3,3,0) predictions unreasonable
+# ! (0,2,1) auto better AIC
+# No residual issues
+models_ug[[ unis[11] ]] <- Arima(ts(wide_usm[, paste0(unis[11], "_Undergraduate")]), c(0,2,1))
+
+forecasts_ug = list()
+for(uni in unis) {
+  forecasts_ug[[uni]] = as.numeric(forecast(models_ug[[uni]])$mean)
+}
+
+forecasts_ug_df <- data.frame(forecasts_ug)
+forecasts_ug_df <- as.data.frame(t(forecasts_ug_df))
+forecasts_ug_df <- rownames_to_column(forecasts_ug_df, "University")
+colnames(forecasts_ug_df) <- c("University", paste0("Yr_", 2025:2034))
+forecasts_ug_df
+```
+
+
+```{r}
+# Graduate models
+uni <- unis[11]
+
+curr_g <- ts(wide_usm[, paste0(uni, "_Graduate")])
+
+ts.plot(curr_g, main=paste0(uni, "_Graduate"))
+
+d = 2
+
+ts.plot(diff(curr_g, difference=d))
+adf.test(diff(curr_g, difference=d))
+kpss.test(diff(curr_g, difference=d))
+
+curr_g_d <- diff(curr_g, difference=d)
+
+acf(curr_g_d)
+pacf(curr_g_d)
+
+auto.arima(curr_g)
+Arima(curr_g, c(1,1,0))
+
+plot(forecast(auto.arima(curr_g)))
+plot(forecast(Arima(curr_g, c(1,1,0))))
+
+checkresiduals(auto.arima(curr_g))
+checkresiduals(Arima(curr_g, c(1,1,0)))
+
+
+models_g <- list()
+# Bowie State stationary at d=2 (looks reasonable at d=1)
+# (0,2,0), maybe (1,1,0)?
+# ! auto gets (1,1,0), believable; (0,2,0) has massive forecasting error
+# no issues with residuals
+models_g[[ unis[1] ]] <- Arima(ts(wide_usm[, paste0(unis[1], "_Graduate")]), c(1,1,0))
+# Coppin State stationary at d=1
+# ! (0,1,0) clearly
+# auto agrees
+# residuals look fine
+models_g[[ unis[2] ]] <- Arima(ts(wide_usm[, paste0(unis[2], "_Graduate")]), c(0,1,0))
+# Frostburg stationary at d=2 for sure, only adf says not at d=1
+# (2,2,0) or (0,1,0)
+# ! auto says (0,1,0), comparable performance with simpler model
+# residuals fine
+models_g[[ unis[3] ]] <- Arima(ts(wide_usm[, paste0(unis[3], "_Graduate")]), c(0,1,0))
+# Salisbury stationary at d=2 (adf disagrees d=1)
+# (1,2,0) or (0,1,0)
+# ! auto says (0,1,0)
+# residuals fine
+models_g[[ unis[4] ]] <- Arima(ts(wide_usm[, paste0(unis[4], "_Graduate")]), c(0,1,0))
+# Towson stationary at d=3 (adf disagrees d=2; big spike)
+# (3,3,0) ish or (3,2,0)
+# auto says (2,1,0) (acf is best for (3,2,0))
+# 
+models_g[[ unis[5] ]] <- Arima(ts(wide_usm[, paste0(unis[5], "_Graduate")]), c(3,2,0))
+# UBalt stationary at d=2
+# (0,2,0)
+# auto says (2,0,0) with drift; less believable model and non-stationary
+# residuals fine
+models_g[[ unis[6] ]] <- Arima(ts(wide_usm[, paste0(unis[6], "_Graduate")]), c(0,2,0))
+# UMGC stationary at d=3 though d=1 is close
+# (2,3,0) or (1,1,0)
+# auto gets (1,1,0); worse AIC than (2,3,0); prefer (1,1,0); consider log transform
+# residuals good for both
+models_g[[ unis[7] ]] <- Arima(ts(wide_usm[, paste0(unis[7], "_Graduate")]), c(1,1,0))
+# UMBalt stationary at d=2 (adf disagrees d=1)
+# (0,2,0) or (1,1,0)
+# auto says (1,1,0)
+# residuals good
+models_g[[ unis[8] ]] <- Arima(ts(wide_usm[, paste0(unis[8], "_Graduate")]), c(1,1,0))
+# UMBC stationary at d=2 (adf disagrees d=1)
+# (0,2,0) or (0,1,0)
+# auto says (0,1,1) drift (best AIC), also best predictions
+# residuals good
+models_g[[ unis[9] ]] <- Arima(ts(wide_usm[, paste0(unis[9], "_Graduate")]), c(0,1,1), include.drift=T)
+# UMCP stationary at d=2 (adf disagrees d=1)
+# (0,2,0) (some values on bands) or (1,1,0)
+# auto says (1,1,0) (worse AIC than (0,2,0))
+# residuals good
+models_g[[ unis[10] ]] <- Arima(ts(wide_usm[, paste0(unis[10], "_Graduate")]), c(1,1,0))
+# Eastern Shore stationary at d=2
+# (1,1,0)
+# auto says (0,1,0) with drift (better AIC, better forecast)
+# residuals good
+models_g[[ unis[11] ]] <- Arima(ts(wide_usm[, paste0(unis[11], "_Graduate")]), c(0,1,0), include.drift=T)
+
+
+forecasts_g = list()
+for(uni in unis) {
+  forecasts_g[[uni]] = as.numeric(forecast(models_g[[uni]])$mean)
+}
+
+forecasts_g_df <- data.frame(forecasts_g)
+forecasts_g_df <- as.data.frame(t(forecasts_g_df))
+forecasts_g_df <- rownames_to_column(forecasts_g_df, "University")
+colnames(forecasts_g_df) <- c("University", paste0("Yr_", 2025:2034))
+forecasts_g_df
+```
+
+
+```{r}
+# Combining my forecasts
+# First, combine dataframes and round to integers (can't have decimal people)
+forecasts_ug_df <- forecasts_ug_df |> 
+  mutate(Type = "Undergraduate", .before=2) |> 
+  mutate(across(is.numeric, round))
+forecasts_g_df <- forecasts_g_df |> 
+  mutate(Type = "Graduate", .before=2) |> 
+  mutate(across(is.numeric, round))
+
+fores <- 
+  rbind(forecasts_ug_df, forecasts_g_df) |> 
+  mutate(University = gsub("\\.|,", "", University)) |> 
+  arrange(University)  |> 
+  t() |> 
+  as.data.frame()
+
+sums <- list()
+for(i in seq(1, 21, by=2)) {
+  sums[[i]] <- as.numeric(fores[3:12, paste0("V", i)]) + as.numeric(fores[3:12, paste0("V", i+1)])
+}
+
+sums <- as.data.frame(sums[seq(1,21, by=2)])
+unis_t <- sort(gsub("\\.|,", "", unis))
+colnames(sums) <- unis_t
+sums <- rbind(unis_t, rep("Total", times=11), sums)
+
+full_fores <- cbind(fores, sums) |> t() |> as.data.frame()
+rownames(full_fores) <- NULL
+full_fores <- 
+  full_fores |> 
+  arrange(University) |> 
+  mutate(across(matches("Yr"), as.numeric))
+full_fores
+
+usm_total <- colSums(full_fores[seq(3, 33, by=3), 3:12])
+usm_nogc_total <- colSums(full_fores[seq(3, 30, by=3), 3:12])
+usm_ug_total <- colSums(full_fores[seq(1, 31, by=3), 3:12])
+usm_ug_nogc_total <- colSums(full_fores[seq(1, 28, by=3), 3:12])
+usm_g_total <- colSums(full_fores[seq(2, 32, by=3), 3:12])
+usm_g_nogc_total <- colSums(full_fores[seq(2, 29, by=3), 3:12])
+
+totals <- rbind(usm_ug_total, usm_g_total, usm_total,
+                usm_ug_nogc_total, usm_g_nogc_total, usm_nogc_total)
+totals <- as.data.frame(totals)
+rownames(totals) <- NULL
+totals <- totals |> mutate(University = rep(c("USM", "USMnoGC"), times=c(3,3)),
+                 Type = rep(c("Undergraduate", "Graduate", "Total"), 2), .before=1)
+
+full_fores <- rbind(full_fores, totals) |> arrange(University)
+```
+
+```{r results='asis'}
+# For copying select results to LaTeX format
+temp <- full_fores |> mutate(University = ifelse(Type == "Undergraduate", University, ""))
+xtable(temp)
+```
+
+
+```{r}
+MHECpreds <- read.csv("MHECPreds.csv")
+MHECpreds
+
+USMpreds <- read.csv("USMPreds.csv")
+USMpreds
+```
+
+```{r}
+MHECwide <- MHECpreds |> 
+  mutate(StudentType = ifelse(grepl("Under", StudentType), "Undergraduate", "Graduate")) |> 
+  mutate(University = rep(unique(University)[-2], times=1, each=4)) |>
+  aggregate(. ~ University + StudentType, sum)
+
+
+
+USMwide <- USMpreds |> 
+  filter(grepl("(Head|Und|Gra)", Type)) |> 
+  mutate(School = rep(unique(School)[-2], times=1, each=3)) |> 
+  mutate(Type = case_when(Type == "HeadcountTotal" ~ "Total",
+                          Type == " HeadcountTotal" ~ "Total", # Mistake in my .csv creation
+                          Type == "UndergraduateTotal" ~ "Undergraduate",
+                          Type == "Grad./FirstProf.Total" ~ "Graduate"))
+
+
+full_USM <- USMwide |> 
+  select(-c(X2023, Number, Percent))
+
+
+# Get undergrad + grad for MHEC
+MHECtemp <- MHECwide |> 
+  arrange(University) |> 
+  filter(University != "St.Mary'sCollegeofMaryland") |> 
+  filter(University != "MorganStateUniversity")
+
+unis_t
+
+sums <- list()
+for(uni in unis_t) {
+  sums[[uni]] <- colSums(MHECtemp |> filter(University == uni) |> select(-c(1,2)))
+}
+sums <- as.data.frame(sums)
+sums <- as.data.frame(t(sums))
+sums <- mutate(sums, University = rownames(sums), .before=1)
+sums <- mutate(sums, StudentType=rep("Total", 11), .before=2)
+rownames(sums) <- NULL
+sums
+
+mhec_ug_total <- MHECwide[c(21), 3:12]
+mhec_g_total <- MHECwide[c(7), 3:12]
+mhec_total <- mhec_ug_total + mhec_g_total
+
+mhec_ug_nogc_total <- mhec_ug_total - MHECwide[28, 3:12]
+mhec_g_nogc_total <- mhec_g_total - MHECwide[14, 3:12]
+mhec_nogc_total <- mhec_g_nogc_total + mhec_ug_nogc_total
+
+totals <- as.data.frame(rbind(
+  mhec_total,
+  mhec_ug_nogc_total,
+  mhec_g_nogc_total,
+  mhec_nogc_total)) |> 
+  mutate(University = rep(c("TotalPublicFour-Year", "USMnoGC"), times=c(1,3)),
+         StudentType = c("Total", "Undergraduate", "Graduate", "Total"), 
+         .before=1)
+rownames(totals) <- NULL
+
+
+full_MHEC <- rbind(MHECtemp, sums, totals)|> 
+  arrange(University)
+```
+
+
+```{r}
+full_fores
+colnames(full_fores) <- c("University", "Type", "Yr_2025", "Yr_2026", "Yr_2027", 
+                          "Yr_2028", "Yr_2029", "Yr_2030", "Yr_2031", "Yr_2032",
+                          "Yr_2033", "Yr_2034")
+final_fores <- full_fores |> 
+  mutate(Type = factor(Type, levels=c("Undergraduate", "Graduate", "Total"))) |>
+  arrange(University, Type)
+
+full_MHEC
+colnames(full_MHEC) <- c("University", "Type", "Yr_2024", "Yr_2025", "Yr_2026", 
+                         "Yr_2027", "Yr_2028", "Yr_2029", "Yr_2030", "Yr_2031", 
+                         "Yr_2032", "Yr_2033")
+final_MHEC <- full_MHEC |>  
+  mutate(Type = factor(Type, levels=c("Undergraduate", "Graduate", "Total")), .before=2,
+         University = replace(University, University == "TotalPublicFour-Year", "USM")) |>
+  arrange(University, Type)
+
+full_USM
+colnames(full_USM) <- c("University", "Type", "Yr_2024", "Yr_2025", "Yr_2026", 
+                        "Yr_2027", "Yr_2028", "Yr_2029", "Yr_2030", "Yr_2031", 
+                        "Yr_2032", "Yr_2033")
+final_USM <- full_USM |> 
+  mutate(Type = factor(Type, levels=c("Undergraduate", "Graduate", "Total")),
+         University = rep(c("USM", "USMnoGC", "BowieStateUniversity", "CoppinStateUniversity",
+                            "FrostburgUniversity", "SalisburyUniversity", "TowsonUniversity",
+                            "UniversityofBaltimore", "UniversityofMarylandBaltimore",
+                            "UniversityofMarylandBaltimoreCounty", "UniversityofMarylandCollegePark", 
+                            "UniversityofMarylandEasternShore", 
+                            "UniversityofMarylandGlobalCampus"), each=3)) |>
+  arrange(University, Type)
+
+unique(full_USM$University)
+
+```
+
+
+```{r}
+final_fores |> filter(University == "USM")
+final_MHEC |> filter(University == "USM")
+final_USM |> filter(University == "USM")
+
+final_fores |> filter(University == "UniversityofMarylandGlobalCampus")
+final_MHEC |> filter(University == "UniversityofMarylandGlobalCampus")
+final_USM |> filter(University == "UniversityofMarylandGlobalCampus")
+```
+
+
+```{r}
+monster_fores <- rbind( final_fores |> mutate(Pred = "TimeSeries") |> select(-Yr_2034),
+                        final_MHEC |> mutate(Pred = "MHEC") |> select(-Yr_2024),
+                        final_USM |> mutate(Pred = "USM") |> select(-Yr_2024))
+
+all_unis <- c(unis_t, "USM", "USMnoGC")
+
+for(uni in all_unis) {
+  monster_fores |> 
+    filter(University == uni) |> 
+    pivot_longer(
+      names_to = "Year",
+      cols = matches("Yr_"),
+      values_to = "Enrollment"
+    ) |> 
+    mutate(Year = as.numeric(substr(Year, 4, 7))) |> 
+    ggplot(aes(x=Year, y=Enrollment, color=Pred)) + 
+      facet_wrap( ~ Type, scales="free") +
+      geom_line(linewidth=.75) + 
+      labs(title = paste0("Enrollment Forecasts for ", uni),
+           subtitle = "2025 to 2033") +
+      theme(axis.text.x = element_text(angle=45))
+  ggsave(paste0(uni, "TriPreds.png"), height=1200, width=1800, units="px")
+}
+
+
+long_usm_nogc <- wide_usm_nogc |> 
+  pivot_longer(
+    cols = c(2,3,4),
+    names_to = "Level",
+    names_prefix = "USMTotals_",
+    values_to = "Count"
+  ) |>
+  mutate(School = "USMnoGC", .before=2) |> 
+  relocate(Year, .before=4)
+
+long_usm_f <- long_usm |>
+  mutate(School = ifelse(School == "USMTotals", "USM", School)) |>
+  rbind(long_usm_nogc) |> 
+  mutate(School = gsub(",", "", School))
+  
+
+for(uni in all_unis) {
+  long_usm_f |> 
+    filter(School == uni) |> 
+    ggplot(aes(x=Year, y=Count, color=Level)) + 
+      geom_line(linewidth=1) + 
+      labs(title = paste0("Historical Enrollment for ", uni),
+           subtitle = "1978 to 2024") + 
+      scale_color_brewer(palette = "Accent")
+  ggsave(paste0(uni, "HistoricalEnrollment.png"))
+}
+
+unique(long_usm_f$School)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# OLD CODE; ARCHIVE ONLY
+
+```{r}
+mdpopraw <- read.csv("mdpop.csv")
+k12raw <- read.csv("k12enrollment.csv")
+
+k12 <- k12raw
+colnames(k12) <- c("year", "elementary", "middle", "high", "total")
+k12
+
+# Checking if manual data input was correct
+k12 |> mutate(check = total - (elementary + middle + high)) |> select(c(year, check))
+# Upon further checking - totals do not match in dataset (1974 is correct, as is diff of 1)
+```
+
+
+
+```{r}
+usm_total_ts <- usm_totals$Count
+
+png("USM_ACF_d0.png")
+acf(usm_total_ts) # Clearly random walk; will take difference
+dev.off()
+
+png("USM_ACF_d1.png")
+acf(diff(usm_total_ts)) # 1 is still significant, no longer random walk
+dev.off()
+png("USM_PACF_d1.png")
+pacf(diff(usm_total_ts)) # only 1 significant
+dev.off()
+
+# From this, expecting ARIMA(1,1,0)
+usm_total_md <- auto.arima(usm_total_ts)
+
+Arima(usm_total_ts, order=c(1,1,0))
+# Auto gives drift - figure out what that means, if we should use it, etc.
+```
+
+```{r}
+usm_totals |> ggplot(aes(x=Year, y=Count)) + geom_line()
+mdpop <- mdpopraw |> rename(Year = year, Population = population)
+mdpop |> ggplot(aes(x=Year, y=Population)) + geom_line()
+
+usm_pop <- merge(usm_totals, mdpop, by="Year")
+usm_pop_ts <- usm_pop |> select(c(Count, Population)) |> mutate(t=row_number())
+
+ggplot(usm_pop, aes(x=Year, y=Count)) + geom_line()
+ggplot(usm_pop, aes(x=Year, y=Count/Population)) + geom_line()
+ggplot(usm_pct, aes(x=Year, y=pct)) + geom_line()
+
+usm_pct <- usm_pop |> mutate(pct = (Count / lag(Count) - 1) * 100)
+
+
+usm_pct_ts <- (usm_pct$pct)[-1]
+acf(usm_pct_ts)
+pacf(usm_pct_ts)
+
+Arima(usm_pct_ts, order=c(1,0,1))
+auto.arima(usm_pct_ts)
+
+
+no_umgc
+
+usm_nogc_pct_ts <- 1 # FINISH
+```
+
+
+```{r}
+# Want to compare total with UMGC and without, since it's big outlier in trend
+# I don't think this code works
+long_usm |> 
+  filter(Level == "Total", 
+         School %in% c("USMTotals", "UniversityofMarylandGlobalCampus")) |> 
+  reframe(Year = Year[1:47],
+          Count = Count[1:47] - Count[48:94]) |> 
+  ggplot(aes(x=Year, y=Count)) + 
+    geom_line()
+  
+
+no_umgc <- wide_usm |> 
+  mutate(NoUMGC_Total = USMTotals_Total - UniversityofMarylandGlobalCampus_Total) |>
+  select(c(Year, USMTotals_Total, NoUMGC_Total))
+
+no_umgc |> 
+  ggplot(aes(x=Year)) +
+    geom_line(aes(y=NoUMGC_Total), color="red") + 
+    geom_line(aes(y=USMTotals_Total), color="blue")
+  
+
+no_umgc_ts <- no_umgc$NoUMGC_Total
+
+png("USM_NoGC_ACF_d0.png")
+acf(no_umgc_ts) # Random walk, so take difference
+dev.off()
+
+png("USM_NoGC_ACF_d1.png")
+acf(diff(no_umgc_ts)) # 1 is significant
+dev.off()
+png("USM_NoGC_PACF_d1.png")
+pacf(diff(no_umgc_ts)) # 1 is significant
+dev.off()
+
+# Expecting ARIMA(1,1,0)
+no_umgc_md <- auto.arima(no_umgc_ts)
+
+Arima(no_umgc_ts, c(1,1,0))
+
+png("USM_NoGC_d1_raw.png")
+plot(diff(no_umgc_ts), main="USM totals, no UMGC, d=1") # Looks like white noise
+dev.off()
+png("USM_NoGC_auto_resid.png")
+plot(no_umgc_md$residuals, main="Residuals of auto.arima on USM totals without UMGC") # Looks like white noise
+dev.off()
+
+png("USM_d1_raw.png")
+plot(diff(usm_total_ts), main="USM totals, d=1") # Variance grows over time
+dev.off()
+
+png("USM_auto_resid.png")
+plot(usm_total_md$residuals, main="Residuals of auto.arima on USM totals") # Variance grows over time
+dev.off()
+
+
+
+
+
+plot(diff(log(usm_total_ts))) # Kinda helps? Not much though
+plot(diff(sqrt(usm_total_ts))) # Still nothing
+plot(diff(10000000/usm_total_ts)) # Much better, don't know if this is valid
+plot(diff(diff(usm_total_ts))) # Still non-constant
+
+aa <- auto.arima(10000000/usm_total_ts)
+plot(aa$fitted, type='l', col="red")
+lines(10000000 / usm_total_ts)
+
+plot(forecast(aa))
+
+
+usm_total_gamma <- glm(Count ~ Year, usm_totals, family=Gamma)
+summary(usm_total_gamma)
+
+plot(usm_total_gamma)
+plot(usm_total_gamma$fitted.values, type='l', col="red")
+lines(usm_total_ts)
+
+# Investigate this more later
+lambda <- BoxCox.lambda(usm_total_ts)
+bc_usm <- BoxCox(usm_total_ts, lambda)
+plot(bc_usm)
+acf(bc_usm)
+acf(diff(bc_usm))
+pacf(diff(bc_usm))
+auto.arima(bc_usm)
+
+
+
+
+
+
+
+f_no_umgc <- forecast(no_umgc_md)
+png("USM_NoGC_Forecast_Auto.png")
+plot(f_no_umgc)
+dev.off()
+
+# ARIMA(1,1,0) is better without drift (marginally)
+Arima(no_umgc_ts, c(1,1,0), include.drift = T)
+Arima(no_umgc_ts, c(1,1,0), include.drift = F)
+
+png("USM_NoGC_Forecast_110.png")
+# include.drift=F default, included to be explicit about difference in models
+plot(forecast(Arima(no_umgc_ts, c(1,1,0), include.drift=F))) 
+dev.off()
+
+f_usm_total <- forecast(usm_total_md)
+png("USM_Forecast_Auto.png")
+plot(f_usm_total)
+dev.off()
+```
+
+
+
+```{r}
+# Population proportional
+usm_pop_complete <- merge(usm_pop, no_umgc) |> 
+  select(-Count) |> 
+  rename(USM_Total=USMTotals_Total) |> 
+  mutate(USM_Total_prop = USM_Total / Population, 
+         NoUMGC_Total_prop = NoUMGC_Total / Population)
+
+
+usm_pop_complete |> 
+  ggplot(aes(x=Year)) + 
+  geom_line(aes(y=USM_Total_prop, color="blue")) + 
+  geom_line(aes(y=NoUMGC_Total_prop, color="red"))
+
+noumgc_prop_ts <- usm_pop_complete$NoUMGC_Total_prop
+usm_prop_ts <- usm_pop_complete$USM_Total_prop
+
+acf(noumgc_prop_ts)
+acf(diff(noumgc_prop_ts))
+pacf(diff(noumgc_prop_ts))
+plot(diff(noumgc_prop_ts))
+
+noumgc_prop_md <- auto.arima(noumgc_prop_ts)
+
+plot(residuals(noumgc_prop_md))
+
+
+
+acf(usm_prop_ts)
+acf(diff(usm_prop_ts))
+plot(diff(usm_prop_ts)) # Still non-stationary; variance grows with time
+```
+
+```{r}
+# Separate models
+wide_usm
+
+usm_undergrad <- wide_usm |> 
+  select(c(Year, matches("Undergraduate"))) |> 
+  rename_with(~ gsub("_Undergraduate", "", .x, fixed=TRUE))
+
+unis <- colnames(usm_undergrad)[-c(1,2)]
+
+for(col in unis) {
+  plot(usm_undergrad$Year, usm_undergrad[[col]], xlab="Year", ylab=col)
+}
+
+
+# Outliers in stationarity: Salisbury (2020), UBalt?, UMGC (2020), some others sketchy
+for(col in unis) {
+  plot(usm_undergrad$Year[-1], diff(usm_undergrad[[col]]), xlab="Year", ylab=col)
+}
+
+# 4 and 6 look maybe nonstationary, some others maybe too
+for(col in unis) {
+  acf(diff(usm_undergrad[[col]]), main=col)
+  # pacf(diff(usm_undergrad[[col]]))
+}
+
+# UBalt and Salisbury are the issue, as expected (I think, check indices)
+for(i in c(4,6)) {
+  plot(usm_undergrad$Year[-1], diff(usm_undergrad[[unis[i]]]), xlab="Year", ylab=unis[i])
+}
+
+
+mds <- list()
+for(i in seq(1:11)) {
+  mds[[i]] <- auto.arima(usm_undergrad[[unis[i]]])
+  print(unis[i])
+  print(mds[[i]])
+}
+
+fits <- rep(0, nrow(usm_undergrad))
+preds <- rep(0, 10)
+for(i in seq(1:11)) {
+  fits <- fits + fitted(mds[[i]])
+  preds <- preds + forecast(mds[[i]])$mean
+}
+fits
+preds
+
+usm_ugrad_md <- auto.arima(wide_usm$USMTotals_Undergraduate)
+
+plot(fits, col="red", xlim=c(1,57), ylim=c(75800, 160000))
+lines(wide_usm$USMTotals_Undergraduate)
+lines(preds, col="blue")
+lines(fitted(usm_ugrad_md), col="green")
+
+plot(forecast(usm_ugrad_md))
+```
+
+
+```{r}
+k12 |> 
+  pivot_longer(
+    names_to = "level",
+    values_to = "count",
+    cols = 2:5
+  ) |> 
+  ggplot(aes(x=year, y=count, color=level)) + 
+    geom_line(lwd=1)
+ggsave("K12EnrollRaw.png", width=6, height=4, dpi=300)
+```
+
+```{r}
+library(vars)
+
+# adf.test(k12$elementary)
+
+summary(VAR(k12[, 2:4]))
+
+
+
+
+
+summary(VAR(wide_usm[, c(1, seq(7, 37, 3))]))
+```
+
+
+
+```{r}
+# None of these models look like good predictors (which is known issue with regression, right?)
+
+usm_totals_t <- usm_totals |> mutate(t = row_number())
+
+usm_reg <- lm(Count ~ t, usm_totals_t)
+summary(usm_reg)
+
+usm_reg2 <- lm(Count ~ t + I(t^2), usm_totals_t)
+summary(usm_reg2)
+
+usm_reg3 <- lm(Count ~ t + I(t^2) + I(t^3), usm_totals_t)
+summary(usm_reg3)
+
+usm_reg4 <- lm(Count ~ t + I(t^2) + I(t^3) + I(t^4), usm_totals_t)
+summary(usm_reg4)
+
+ggplot(usm_totals_t, aes(x=t, y=Count)) + 
+  geom_line(lwd=.75) + 
+  geom_line(aes(y=fitted(usm_reg), color="lin")) + 
+  geom_line(aes(y=fitted(usm_reg2), color="quad")) +
+  geom_line(aes(y=fitted(usm_reg3), color="cube")) + 
+  geom_line(aes(y=fitted(usm_reg4), color="quart")) + 
+  scale_color_manual(values=c("lin"="#009292", "quad"="#FFB6DB", "cube"="#920000", "quart"="#24FF24"))
+```
+
+```{r}
+pois_md <- glm(Count ~ offset(log(Population)) + t + I(t^2) + I(t^3) + I(t^4), usm_pop_ts, family=poisson)
+summary(pois_md)
+
+plot(pois_md)
+
+
+
+# Trying to do differences since there's clearly autocorrelation in resid v fit, 
+# but can't do negatives (which diff gives) in Poisson
+usm_pop_ts_diff <- usm_pop_ts[-1, ]
+usm_pop_ts_diff$Count = diff(usm_pop_ts$Count)
+
+
+pois_d_md <- glm(Count ~ offset(log(Population)) + t, usm_pop_ts_diff, family=poisson)
+```
+
+
+
+
+
+
+
